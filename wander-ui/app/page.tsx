@@ -19,6 +19,8 @@ import {
   Loader2,
 } from "lucide-react";
 
+import { MapPreview } from "./components/MapPreview";
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Screen = "input" | "loading" | "route";
