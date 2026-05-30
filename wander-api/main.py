@@ -87,6 +87,9 @@ class WaypointV3(BaseModel):
     address_hint: str
     google_rating: Optional[float] = None
     photo_url: Optional[str] = None
+    place_id: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
     action_description: str
     duration_mins: int
     walk_to_next_mins: int = 0
@@ -497,6 +500,9 @@ async def generate_route(request: RouteRequest):
                         address  = venue["address"]   if venue else request.start_location
                         rating   = venue.get("rating")    if venue else None
                         photo_url = venue.get("photo_url") if venue else None
+                        place_id = venue.get("place_id")  if venue else None
+                        lat      = venue.get("lat")       if venue else None
+                        lng      = venue.get("lng")       if venue else None
 
                         addresses.append(address)
                         waypoints.append(
@@ -506,6 +512,9 @@ async def generate_route(request: RouteRequest):
                                 address_hint=address,
                                 google_rating=rating,
                                 photo_url=photo_url,
+                                place_id=place_id,
+                                lat=lat,
+                                lng=lng,
                                 action_description=wp.action_description,
                                 duration_mins=wp.duration_mins,
                                 walk_to_next_mins=0,  # filled below

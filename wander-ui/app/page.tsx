@@ -33,6 +33,9 @@ interface WaypointV3 {
   walk_to_next_mins: number;
   vibe_tag: string;
   insider_tip: string;
+  place_id?: string | null;
+  lat?: number | null;
+  lng?: number | null;
 }
 
 interface WanderRouteOptionV3 {
@@ -438,12 +441,25 @@ function WaypointCard({ waypoint }: { waypoint: WaypointV3 }) {
           )}
 
           <div className="flex items-start justify-between gap-2 mb-1">
-            <h3
-              className="text-[#f4f4f5] text-xl font-semibold leading-tight"
-              style={{ fontFamily: "var(--font-playfair)" }}
-            >
-              {waypoint.location_name}
-            </h3>
+            {waypoint.place_id ? (
+              <a
+                href={`https://www.google.com/maps/place/?q=place_id:${waypoint.place_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[#f4f4f5] hover:text-[#8ba88e] transition-colors text-xl font-semibold leading-tight flex items-center gap-2 group"
+                style={{ fontFamily: "var(--font-playfair)" }}
+              >
+                {waypoint.location_name}
+                <ExternalLink className="w-4 h-4 shrink-0 text-[#f4f4f5]/30 group-hover:text-[#8ba88e] transition-colors" strokeWidth={1.5} />
+              </a>
+            ) : (
+              <h3
+                className="text-[#f4f4f5] text-xl font-semibold leading-tight"
+                style={{ fontFamily: "var(--font-playfair)" }}
+              >
+                {waypoint.location_name}
+              </h3>
+            )}
             {/* rating badge — only shown when no photo (photo shows it above) */}
             {!waypoint.photo_url && waypoint.google_rating != null && (
               <span
@@ -468,9 +484,23 @@ function WaypointCard({ waypoint }: { waypoint: WaypointV3 }) {
             {waypoint.action_description}
           </p>
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-[#e5d3b3]/60 text-[12px] font-light" style={{ fontFamily: "var(--font-inter)" }}>
-              <Timer className="w-3.5 h-3.5" strokeWidth={1.5} />
-              {waypoint.duration_mins} min
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-1.5 text-[#e5d3b3]/60 text-[12px] font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                <Timer className="w-3.5 h-3.5" strokeWidth={1.5} />
+                {waypoint.duration_mins} min
+              </div>
+              {waypoint.lat && waypoint.lng && (
+                 <a
+                    href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${waypoint.lat},${waypoint.lng}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 text-[#e5d3b3]/50 hover:text-[#e5d3b3]/80 text-[12px] font-medium transition-colors"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                 >
+                   <MapPin className="w-3.5 h-3.5" strokeWidth={1.5} />
+                   Street View
+                 </a>
+              )}
             </div>
             <button
               id={`tip-toggle-${waypoint.order}`}
@@ -510,7 +540,11 @@ function WaypointCard({ waypoint }: { waypoint: WaypointV3 }) {
 
 // ── Walk Label (between stops) ────────────────────────────────────────────────
 
-function WalkLabel({ mins }: { mins: number }) {
+function WalkLabel({ mins, origin, destination }: { mins: number, origin?: {lat: number, lng: number}, destination?: {lat: number, lng: number} }) {
+  const directionsUrl = origin && destination
+    ? `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${destination.lat},${destination.lng}&travelmode=walking`
+    : null;
+
   return (
     <motion.div
       variants={cardVariants}
@@ -518,12 +552,25 @@ function WalkLabel({ mins }: { mins: number }) {
     >
       <div className="w-px h-4 bg-[#8ba88e]/15 ml-[3px]" />
       <Footprints className="w-3 h-3 text-[#8ba88e]/30" strokeWidth={1.5} />
-      <span
-        className="text-[#f4f4f5]/25 text-[11px] font-light tracking-wide"
-        style={{ fontFamily: "var(--font-inter)" }}
-      >
-        ~{mins} min walk
-      </span>
+      {directionsUrl ? (
+        <a
+          href={directionsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1.5 text-[#f4f4f5]/40 hover:text-[#8ba88e] text-[11px] font-medium tracking-wide transition-colors"
+          style={{ fontFamily: "var(--font-inter)" }}
+        >
+          ~{mins} min walk
+          <ExternalLink className="w-3 h-3 shrink-0" strokeWidth={1.5} />
+        </a>
+      ) : (
+        <span
+          className="text-[#f4f4f5]/25 text-[11px] font-light tracking-wide"
+          style={{ fontFamily: "var(--font-inter)" }}
+        >
+          ~{mins} min walk
+        </span>
+      )}
     </motion.div>
   );
 }
@@ -678,7 +725,11 @@ function RouteScreen({
                 {/* Walk label to next stop */}
                 {i < activeRoute.waypoints.length - 1 && wp.walk_to_next_mins > 0 && (
                   <div className="ml-10">
-                    <WalkLabel mins={wp.walk_to_next_mins} />
+                    <WalkLabel 
+                      mins={wp.walk_to_next_mins}
+                      origin={(wp.lat != null && wp.lng != null) ? { lat: wp.lat as number, lng: wp.lng as number } : undefined}
+                      destination={(activeRoute.waypoints[i+1].lat != null && activeRoute.waypoints[i+1].lng != null) ? { lat: activeRoute.waypoints[i+1].lat as number, lng: activeRoute.waypoints[i+1].lng as number } : undefined}
+                    />
                   </div>
                 )}
               </div>
