@@ -100,12 +100,12 @@ const VIBES: {
 ];
 
 const LOADING_MESSAGES = [
-  "Reading the streets\u2026",
-  "Curating three paths\u2026",
-  "Consulting the locals\u2026",
-  "Perfecting the timing\u2026",
-  "Uncovering hidden gems\u2026",
-  "Almost ready to wander\u2026",
+  "reading the streets…",
+  "curating three paths…",
+  "consulting the locals…",
+  "perfecting the timing…",
+  "uncovering hidden gems…",
+  "almost ready to wander…",
 ];
 
 // ── Motion Variants ───────────────────────────────────────────────────────────
@@ -188,16 +188,16 @@ function InputScreen({
         <div className="flex items-center justify-center gap-2.5 mb-5">
           <Navigation className="w-4 h-4 text-[#8ba88e]" strokeWidth={1.5} />
           <span className="text-[11px] font-medium tracking-[0.35em] uppercase text-[#8ba88e]/70" style={{ fontFamily: "var(--font-inter)" }}>
-            Wander
+            wander
           </span>
         </div>
         <h1 className="text-[2.8rem] md:text-[4.5rem] leading-[1.05] font-semibold text-[#f4f4f5] mb-5" style={{ fontFamily: "var(--font-playfair)" }}>
-          Your city has<br />
+          your city has<br />
           <em className="text-[#8ba88e]">secrets</em> to share.
         </h1>
         <p className="text-[#f4f4f5]/35 text-base font-light tracking-wide max-w-sm mx-auto" style={{ fontFamily: "var(--font-inter)" }}>
-          Tell us where you&apos;re starting, where you need to end up, and how you feel today.
-          We&apos;ll generate three distinct routes.
+          tell us where you&apos;re starting, where you need to end up, and how you feel today.
+          we&apos;ll generate three distinct routes.
         </p>
       </motion.header>
 
@@ -246,7 +246,7 @@ function InputScreen({
             <div className="flex items-center justify-between mb-4">
               <label htmlFor="time-budget" className="flex items-center gap-2 text-[#f4f4f5]/40 text-[12px] font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-inter)" }}>
                 <Clock className="w-3.5 h-3.5" strokeWidth={1.5} />
-                Time to wander
+                time to wander
               </label>
               <span className="text-[#e5d3b3] text-sm font-medium" style={{ fontFamily: "var(--font-inter)" }}>
                 {formatTime(timeBudget)}
@@ -269,7 +269,7 @@ function InputScreen({
           {/* Vibe Selector */}
           <div className="mb-8">
             <p className="text-[#f4f4f5]/40 text-[12px] font-medium tracking-widest uppercase mb-4" style={{ fontFamily: "var(--font-inter)" }}>
-              Your vibe
+              your vibe
             </p>
             <div className="grid grid-cols-3 gap-2.5">
               {VIBES.map((v) => {
@@ -317,9 +317,9 @@ function InputScreen({
             style={{ fontFamily: "var(--font-inter)" }}
           >
             {canWander ? (
-              <><span>Generate three routes</span><ArrowRight className="w-4 h-4" strokeWidth={2} /></>
+              <><span>generate three routes</span><ArrowRight className="w-4 h-4" strokeWidth={2} /></>
             ) : (
-              "Fill in the details above"
+              "fill in the details above"
             )}
           </motion.button>
 
@@ -356,7 +356,7 @@ function LoadingScreen({ message }: { message: string }) {
     >
       <motion.div className="text-6xl mb-10 animate-drift" aria-hidden>🗺️</motion.div>
       <div className="text-[11px] tracking-[0.35em] uppercase text-[#8ba88e]/50 mb-6 font-medium" style={{ fontFamily: "var(--font-inter)" }}>
-        Wander
+        wander
       </div>
       <div className="h-10 flex items-center justify-center">
         <AnimatePresence mode="wait">
@@ -514,7 +514,7 @@ function WaypointCard({ waypoint }: { waypoint: WaypointV3 }) {
               style={{ fontFamily: "var(--font-inter)" }}
             >
               <Lightbulb className="w-3.5 h-3.5" strokeWidth={1.5} />
-              {tipOpen ? "Hide tip" : "Insider tip"}
+              {tipOpen ? "hide tip" : "insider tip"}
             </button>
           </div>
           <AnimatePresence>
@@ -622,7 +622,7 @@ function RouteScreen({
           <div className="flex items-center justify-center gap-2 mb-6">
             <Navigation className="w-3.5 h-3.5 text-[#8ba88e]/50" strokeWidth={1.5} />
             <span className="text-[11px] tracking-[0.35em] uppercase text-[#8ba88e]/50 font-medium" style={{ fontFamily: "var(--font-inter)" }}>
-              Three routes found
+              three routes found
             </span>
           </div>
           <h1
@@ -761,7 +761,7 @@ function RouteScreen({
                 <div className="w-3 h-3 rounded-full border-2 border-[#e5d3b3]/30 bg-[#e5d3b3]/8" />
               </div>
               <p className="text-[#e5d3b3]/35 text-[13px] font-light italic" style={{ fontFamily: "var(--font-playfair)" }}>
-                Your destination awaits.
+                your destination awaits.
               </p>
             </motion.div>
           </motion.div>
@@ -781,7 +781,7 @@ function RouteScreen({
             style={{ fontFamily: "var(--font-inter)" }}
           >
             <RotateCcw className="w-3.5 h-3.5" strokeWidth={1.5} />
-            Plan another wander
+            plan another wander
           </button>
         </motion.div>
       </div>
@@ -807,11 +807,11 @@ function RouteScreen({
             style={{ fontFamily: "var(--font-inter)" }}
           >
             <Navigation className="w-4 h-4" strokeWidth={2} />
-            Start Wandering
+            start wandering
             <ExternalLink className="w-3.5 h-3.5 opacity-60" strokeWidth={2} />
           </motion.button>
           <p className="text-center text-[#f4f4f5]/20 text-[11px] mt-2 font-light" style={{ fontFamily: "var(--font-inter)" }}>
-            Opens walking directions in Google Maps
+            opens walking directions in google maps
           </p>
         </div>
       </motion.div>

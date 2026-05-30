@@ -18,7 +18,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Wander — Stop Planning. Start Wandering.",
+  title: "wander — stop planning. start wandering.",
   description:
     "AI-powered urban itinerary generator. Tell us your vibe, we'll handle the rest.",
   keywords: ["urban exploration", "AI itinerary", "city walking", "travel"],
