@@ -22,6 +22,12 @@ export const metadata: Metadata = {
   description:
     "AI-powered urban itinerary generator. Tell us your vibe, we'll handle the rest.",
   keywords: ["urban exploration", "AI itinerary", "city walking", "travel"],
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "wander",
+  },
 };
 
 export default function RootLayout({

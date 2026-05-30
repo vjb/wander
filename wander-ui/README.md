@@ -20,6 +20,8 @@ The Next.js 16 frontend for **Wander** — generates three distinct, Google-veri
 
 ## Design System — *Quiet Luxury / Digital Oasis*
 
+A dark, premium, and minimal palette with elegant typography:
+
 | Token | Value | Use |
 |---|---|---|
 | Obsidian | `#131316` | Page background |
@@ -27,6 +29,8 @@ The Next.js 16 frontend for **Wander** — generates three distinct, Google-veri
 | Matcha | `#8BA88E` | Accent, CTAs, active states |
 | Sand | `#E5D3B3` | Ratings, timers, insider tips |
 | Cream | `#F4F4F5` | Body text |
+
+Typography: **Playfair Display** (serif, headings) + **Inter** (sans, body).
 
 ---
 
@@ -40,13 +44,13 @@ npm run dev
 # → http://localhost:3000
 ```
 
-All `/api/*` requests are proxied to `http://localhost:8000/api/*` via `next.config.ts`.
+All `/api/*` requests are proxied to `http://localhost:8000/api/*` via Next.js rewrites in `next.config.ts`.
 
 ---
 
 ## End-to-End Walkthrough
 
-A real session captured: *Hell's Kitchen → Flatiron District, 90 min, Green & Scenic.*
+An interactive walkthrough session: *Hell's Kitchen ➔ Flatiron District, 90 min, Green & Scenic.*
 
 ---
 
@@ -56,24 +60,24 @@ Open [http://localhost:3000](http://localhost:3000). The input form appears over
 
 ![Landing screen — dark background, Playfair Display headline, glassmorphism card](../assets/01-landing.png)
 
-**Design visible:**
+**Design details:**
 - Serif headline: *"Your city has **secrets** to share."* — Playfair Display
 - Glassmorphism card with `backdrop-blur` + `border-white/7`
-- Navigation icon + `WANDER` wordmark in Matcha at 70% opacity
-- Three vibe selector cards (Caffeinated & Cultured / Green & Scenic / Spontaneous & Social)
-- Disabled CTA button until all fields are filled
+- Navigation icon + `WANDER` wordmark in Matcha
+- Vibe selector buttons (Caffeinated & Cultured / Green & Scenic / Spontaneous & Social) + a custom text prompt input
+- Floating "Install App" button in header (available when installable as a PWA)
 
 ---
 
 ### Screen 2 — Form Filled
 
-Enter your start and end points. Click a vibe. The button activates.
+Enter your start and end points. Select a vibe or type a custom vibe. The button activates.
 
 ![Form filled — Hell's Kitchen to Flatiron, Green & Scenic selected, CTA active](../assets/02-form-filled.png)
 
 **Interaction details:**
 - `Starting from…` / `Ending up at…` — transparent text inputs, no border clutter
-- Time slider: 30 min → 4 hours in 15-minute steps, Sand-colored current value display
+- Time budget slider: 30 min ➔ 4 hours in 15-minute steps, Sand-colored value display
 - Vibe card spring-scales on select, glows with vibe-matched color
 - `Generate three routes →` button activates in Soft Matcha green
 
@@ -81,16 +85,16 @@ Enter your start and end points. Click a vibe. The button activates.
 
 ### Screen 3 — Loading
 
-Click **Generate three routes**. The app crossfades to the loading state while the V3 RAG pipeline runs (geocode → Places radar → GPT-4o → Directions API).
+Click **Generate three routes**. The app crossfades to the loading state while the RAG pipeline runs (geocode ➔ Places radar ➔ GPT-4o ➔ Directions API).
 
 ![Loading screen — map emoji, italic cycling serif text, breathing dots](../assets/03-loading.png)
 
 **What's happening:**
-- 🗺️ emoji drifts on a slow `translateY` loop
+- 🗺️ emoji drifts on a slow vertical loop
 - Italic Playfair Display text cycles every 2 seconds:
-  *Reading the streets… → Curating three paths… → Consulting the locals…*
-- Three pulsing dots with staggered opacity + scale animation
-- Typical response time: 15–25 seconds (Places sweep + GPT-4o + 6 Directions calls)
+  *Reading the streets… ➔ Curating three paths… ➔ Consulting the locals…*
+- Pulsing dots with staggered opacity + scale animation
+- Response time: Sequential stream starts loading Route 1 in ~4 seconds.
 
 ---
 
@@ -100,20 +104,13 @@ Routes arrive. The page crossfades to the itinerary view with a staggered card a
 
 ![Route screen — 3-tab carousel, numbered stops, walk labels, sticky Start Wandering button](../assets/04-route.png)
 
-**V3 features visible:**
+**Core features visible:**
 - **Route carousel** at the top — Framer Motion `layoutId` pill slides between Route 1 / 2 / 3
 - Each tab shows the route name; active tab highlighted in Matcha
-- **Numbered stop cards** — vibe tag pill, location name, `★ 4.6` Google rating badge, address, description, duration
-- **Walk labels** between stops: *🚶 ~12 min walk* (real Google Directions times)
+- **Numbered stop cards** — vibe tag pill, location name, rating badge, address, action description, duration
+- **Walk labels** between stops: *🚶 ~12 min walk* (computed by Google Directions API)
+- **Map Preview** component showing start, stops, end location pins, and a polyline path with directional flow arrows
 - **Sticky "Start Wandering"** button pinned to the bottom with frosted gradient
-
-**Routes generated (Green & Scenic vibe):**
-
-| # | Route | First Stop |
-|---|---|---|
-| 1 | **The Parkway Stroll** | Hudson River Park |
-| 2 | **The Cultural Link** | Intrepid Sea, Air & Space Museum |
-| 3 | **Efficiency Express** | Times Square |
 
 ---
 
@@ -123,7 +120,7 @@ Click Route 2. The Matcha pill slides over, the old timeline fades out, and Rout
 
 ![Carousel switched to Route 2 — Cultural Link stops visible](../assets/05-carousel.png)
 
-**Animation:** `AnimatePresence mode="wait"` with `key={selectedIndex}` — full stagger re-runs on every tab change. No flash. No layout shift.
+**Animation:** `AnimatePresence mode="wait"` with `key={selectedIndex}` — full stagger re-runs on every tab change without layout shift.
 
 ---
 
@@ -133,16 +130,13 @@ Each stop card has a hidden **Insider tip**. Click to expand.
 
 ![Insider tip expanded — italic Playfair quote in Sand color](../assets/06-insider-tip.png)
 
-Example reveal for Hudson River Park:
-> *"Grab a seat at the end of the pier for the best sunset views over the Hudson."*
-
 The tip panel expands with an `AnimatePresence` height animation, separated by a Sand-tinted divider.
 
 ---
 
 ### Screen 7 — Start Wandering
 
-Tap **Start Wandering**. A new tab opens directly in Google Maps with your multi-stop walking tour pre-loaded.
+Tap **Start Wandering**. The app opens your multi-stop walking tour pre-loaded inside Google Maps.
 
 ![Sticky Start Wandering button — frosted gradient footer, Matcha green CTA](../assets/07-sticky-button.png)
 
@@ -155,24 +149,23 @@ https://www.google.com/maps/dir/?api=1
   &travelmode=walking
 ```
 
+---
+
 ### Screen 8 — Google Maps Navigation
 
 Google Maps opens with the full walking route rendered — blue dotted line, all stops pinned, total time and distance calculated.
 
 ![Google Maps walking route — blue dotted line, 4 stops, 1 hr 9 min / 3.0 miles](../assets/08-google-maps.png)
 
-**What you see:**
-- Blue dotted walking route tracing from Hell's Kitchen → Flatiron
-- All waypoints pinned on the map (750 11th Ave, 540 W 26th St)
-- **Route summary:** *via W 49th St and 11th Ave — 1 hr 9 min / 3.0 miles*
-- Walking mode icon selected in the transport bar
-- Tap the blue **Start** button for turn-by-turn GPS navigation
-
-All addresses are URL-encoded server-side in `build_maps_deep_link()`. The native Google Maps app opens on mobile.
+- Blue walking route tracing from start to end location
+- All waypoints pinned on the map
+- Tap the blue **Start** button in Google Maps for turn-by-turn GPS navigation
 
 ---
 
-## V3 API Response Shape
+## API Response Shape
+
+The frontend consumes the following JSON structure from the backend:
 
 ```json
 {
@@ -182,11 +175,17 @@ All addresses are URL-encoded server-side in `build_maps_deep_link()`. The nativ
       "theme_summary": "Ultra-scenic waterfront arc with maximum green space.",
       "total_walking_time_mins": 112,
       "navigation_deep_link": "https://www.google.com/maps/dir/?api=1&...",
+      "start_location": "Hell's Kitchen, NYC",
+      "end_location": "Flatiron District, NYC",
+      "start_lat": 40.7637,
+      "start_lng": -73.9918,
+      "end_lat": 40.7400,
+      "end_lng": -73.9903,
       "waypoints": [
         {
           "order": 1,
           "location_name": "Hudson River Park",
-          "address_hint": "Pier 84, W 44th St & 12th Ave, New York, NY",
+          "address_hint": "Pier 84, New York, NY",
           "google_rating": 4.6,
           "action_description": "Start your journey at the edge of Manhattan...",
           "duration_mins": 20,
@@ -200,9 +199,6 @@ All addresses are URL-encoded server-side in `build_maps_deep_link()`. The nativ
 }
 ```
 
-`google_rating` is sourced directly from Google Places — not generated by the AI.  
-`walk_to_next_mins` is computed by Google Directions API — not estimated by the AI.
-
 ---
 
 ## File Structure
@@ -210,11 +206,17 @@ All addresses are URL-encoded server-side in `build_maps_deep_link()`. The nativ
 ```
 wander-ui/
 ├── app/
-│   ├── globals.css        # Tailwind v4 @theme tokens, custom animations
-│   ├── layout.tsx         # Google Fonts: Playfair Display + Inter
-│   └── page.tsx           # Full 3-screen app (Input → Loading → Route)
+│   ├── components/
+│   │   └── MapPreview.tsx   # Google Maps component using @vis.gl/react-google-maps
+│   ├── r/[id]/
+│   │   └── page.tsx         # Shared route viewer
+│   ├── globals.css          # Tailwind gradients & custom animations
+│   ├── layout.tsx           # Playfair Display & Inter font configurations
+│   └── page.tsx             # Interactive application layout
 ├── public/
-├── next.config.ts         # /api/* → localhost:8000 rewrite proxy
+│   ├── manifest.json        # PWA configuration
+│   └── sw.js                # PWA Service Worker caching
+├── next.config.ts           # API rewrite proxy
 └── package.json
 ```
 
@@ -222,13 +224,13 @@ wander-ui/
 
 ## Screen Reference
 
-| File | Screen | Key V3 Feature |
+| File | Screen | Key Feature |
 |---|---|---|
 | `assets/01-landing.png` | Input form | Glassmorphism card, ambient orbs |
 | `assets/02-form-filled.png` | Form filled | Vibe selection spring animation |
 | `assets/03-loading.png` | Loading state | Cycling serif text, breathing dots |
-| `assets/04-route.png` | Route result | 3-tab carousel, ★ rating badges, walk labels |
-| `assets/05-carousel.png` | Tab switched | Framer Motion `layoutId` pill slide |
-| `assets/06-insider-tip.png` | Tip expanded | AnimatePresence height animation |
-| `assets/07-sticky-button.png` | Start Wandering | Frosted gradient, deep link handoff |
-| `assets/08-google-maps.png` | Google Maps open | Blue walking route, all stops pinned, 1hr 9min / 3mi |
+| `assets/04-route.png` | Route result | 3-tab carousel, map polyline, stop cards |
+| `assets/05-carousel.png` | Tab switched | Timeline re-animations on tab click |
+| `assets/06-insider-tip.png` | Tip expanded | Smooth height expansion, italic text |
+| `assets/07-sticky-button.png` | Start Wandering | Sticky frosted footer, Google Maps deep-link |
+| `assets/08-google-maps.png` | Google Maps open | Walking path loaded in native maps |

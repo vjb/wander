@@ -10,6 +10,7 @@ Architecture:
 """
 
 import asyncio
+import json
 import os
 from typing import Dict, List, Optional
 from urllib.parse import quote_plus
@@ -18,8 +19,12 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from openai import OpenAI
 from pydantic import BaseModel, Field
+
+import database
+
 
 load_dotenv()
 
@@ -27,6 +32,7 @@ load_dotenv()
 OPENAI_KEY  = os.getenv("OPENAI_API_KEY", "")
 GOOGLE_KEY  = os.getenv("GOOGLE_MAPS_API_KEY", "")
 TAVILY_KEY  = os.getenv("TAVILY_API_KEY", "")
+OPENWEATHER_KEY = os.getenv("OPENWEATHER_API_KEY", "")
 
 # ── LangSmith ─────────────────────────────────────────────────────────────────
 try:
@@ -102,6 +108,8 @@ class WanderRouteOptionV3(BaseModel):
     theme_summary: str
     total_walking_time_mins: int
     initial_walk_mins: int = 0
+    start_location: str = ""
+    end_location: str = ""
     start_lat: Optional[float] = None
     start_lng: Optional[float] = None
     end_lat: Optional[float] = None
@@ -110,8 +118,10 @@ class WanderRouteOptionV3(BaseModel):
     navigation_deep_link: str
 
 
+
 class WanderV3Response(BaseModel):
     routes: List[WanderRouteOptionV3]
+    weather_context: Optional[str] = None
 
 
 class RouteRequest(BaseModel):
@@ -119,6 +129,13 @@ class RouteRequest(BaseModel):
     end_location: str
     time_budget_minutes: int
     vibe: str
+    local_time: Optional[str] = None
+
+
+class ShareRequest(BaseModel):
+    route: WanderRouteOptionV3
+    vibe: str
+
 
 
 # ── LLM selection models (RAG mode) ──────────────────────────────────────────
@@ -167,10 +184,76 @@ class V3ResponseLLM(BaseModel):
     )
 
 
-# (Fallback uses the same V3ResponseLLM so "exactly 3 routes" is always enforced)
+# ── Weather and Custom Vibe Helpers ───────────────────────────────────────────
+
+async def _get_weather(lat: float, lng: float) -> Optional[dict]:
+    """Fetch current weather from OpenWeather API at coordinates."""
+    if not OPENWEATHER_KEY:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            res = await client.get(
+                "https://api.openweathermap.org/data/2.5/weather",
+                params={
+                    "lat": lat,
+                    "lon": lng,
+                    "appid": OPENWEATHER_KEY,
+                    "units": "metric"
+                }
+            )
+            if res.status_code == 200:
+                data = res.json()
+                weather_main = data["weather"][0]["main"]
+                weather_desc = data["weather"][0]["description"]
+                temp = round(data["main"]["temp"])
+                return {
+                    "main": weather_main,
+                    "description": weather_desc,
+                    "temp_c": temp,
+                    "is_adverse": weather_main.lower() in ["rain", "snow", "thunderstorm", "drizzle"]
+                }
+    except Exception as e:
+        print(f"Error fetching weather: {e}")
+    return None
+
+
+async def _extract_custom_queries(vibe: str) -> List[str]:
+    """Use GPT-4o-mini to extract search keywords from a user's custom vibe text."""
+    try:
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an assistant that extracts specific Google Maps Places search terms from a descriptive vibe. "
+                            "Extract 3 to 5 distinct, concrete, search queries (e.g. 'bookstore', 'ramen', 'rooftop bar') matching the user's desires. "
+                            "Return ONLY a JSON object containing a 'queries' array of strings. Example: {'queries': ['query1', 'query2']}."
+                        )
+                    },
+                    {"role": "user", "content": vibe}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.0
+            )
+        )
+        content = response.choices[0].message.content
+        if content:
+            data = json.loads(content)
+            queries = data.get("queries")
+            if isinstance(queries, list):
+                return [str(q) for q in queries]
+        return [vibe]
+    except Exception as e:
+        print(f"Error extracting custom queries: {e}")
+        return [vibe]
 
 
 # ── Google Geocoding API ──────────────────────────────────────────────────────
+
 
 async def geocode_location(location: str) -> Optional[Dict[str, float]]:
     """Convert a human address to lat/lng via Google Geocoding API."""
@@ -347,11 +430,17 @@ def build_maps_deep_link(start: str, end: str, waypoint_addresses: List[str]) ->
     )
 
 
-# ── OpenAI RAG generation ─────────────────────────────────────────────────────
+# ── Single Route OpenAI generation (RAG mode) ──────────────────────────────────
 
-@traceable(name="wander_v3_rag", run_type="llm")       # type: ignore
-def _call_openai_rag(request: RouteRequest, venues: List[Dict]) -> V3ResponseLLM:
-    """GPT-4o curates routes from a verified Google Places venue list."""
+def _call_openai_single_route_sync(
+    request: RouteRequest,
+    venues: List[Dict],
+    route_type_desc: str,
+    previously_selected: List[str],
+    weather_info: Optional[Dict],
+    local_time: Optional[str]
+) -> RouteOptionLLM:
+    """GPT-4o curates a single route from a verified Google Places venue list."""
     venue_lines = [
         f"[{i+1}] {v['name']} | {v['address']} | "
         f"{'⭐ ' + str(v['rating']) if v.get('rating') else 'no rating'} | "
@@ -366,31 +455,62 @@ def _call_openai_rag(request: RouteRequest, venues: List[Dict]) -> V3ResponseLLM
     _walk_allowance = _walk_per_leg_mins * _stops
     _per_stop_mins = max(15, (request.time_budget_minutes - _walk_allowance) // _stops)
 
+    weather_prompt_chunk = ""
+    if weather_info:
+        weather_prompt_chunk = (
+            f"CURRENT WEATHER CONDITION: {weather_info['main']} ({weather_info['description']}), Temperature: {weather_info['temp_c']}°C.\n"
+        )
+        if weather_info["is_adverse"]:
+            weather_prompt_chunk += (
+                "IMPORTANT: It is currently raining/snowing/storming at the starting location. "
+                "You MUST prioritize indoor stops (museums, indoor markets, cozy cafes, bookstores) and covered areas. "
+                "Avoid suggesting parks, open plazas, or un-sheltered outdoor walks.\n"
+            )
+        else:
+            weather_prompt_chunk += (
+                "The weather is clear/good. You may prioritize scenic outdoor stops if appropriate for the vibe.\n"
+            )
+
+    time_prompt_chunk = ""
+    if local_time:
+        time_prompt_chunk = (
+            f"CURRENT LOCAL TIME: {local_time}.\n"
+            "IMPORTANT: Tailor the recommended stops to this time of day. "
+            "For example, if it is late night (e.g. after 8 PM), do not recommend coffee shops or bookstores that close early; "
+            "instead suggest bars, evening diners, or late-night dessert spots. If it is morning, suggest coffee shops and breakfast spots.\n"
+        )
+
+    exclude_prompt_chunk = ""
+    if previously_selected:
+        exclude_prompt_chunk = (
+            f"EXCLUDED VENUES: Do NOT use any of these venues as they have been used in previous routes: {', '.join(previously_selected)}.\n"
+        )
+
     system_prompt = f"""You are Wander — an urban experience curator with encyclopedic local knowledge.
 Your life isn't a chore; wander. Help the user feel that.
 
 VERIFIED VENUES (sourced from Google Places — these are real, confirmed businesses):
 {venues_context}
 
-MISSION: Build exactly 3 distinct walking routes from {request.start_location} to {request.end_location}.
-Each route uses 3–4 stops chosen ONLY from the numbered list above.
+MISSION: Build exactly ONE walking route from {request.start_location} to {request.end_location} matching this theme: {route_type_desc}.
+The route must use 3–4 stops chosen ONLY from the numbered list above.
 
-TIME BUDGET: {request.time_budget_minutes} minutes TOTAL per route.
-→ TARGET: Each route should USE approximately {request.time_budget_minutes} minutes — not just fit within it.
+TIME BUDGET: {request.time_budget_minutes} minutes TOTAL.
+→ TARGET: The route should USE approximately {request.time_budget_minutes} minutes.
 → Each stop should have duration_mins of approximately {_per_stop_mins} minutes (scale up for longer budgets).
-→ If the budget is 60 min: stops of ~12–15 min each. If 120 min: ~25–30 min. If 240 min: ~50–60 min each.
-→ DO NOT generate short 45-minute routes when given a 4-hour budget. Fill the time richly.
+
+{weather_prompt_chunk}
+{time_prompt_chunk}
+{exclude_prompt_chunk}
 
 STRICT RULES:
 1. Use ONLY venues from the list. Reference each by its [number] in venue_index. No invented stops.
-2. Each route must use a DIFFERENT set of venues. No shared stops between routes.
-3. Stops must flow geographically toward {request.end_location}. Zero backtracking.
-4. Hard cap: total time (duration_mins + walk_to_next_mins for all stops) ≤ {request.time_budget_minutes} min.
-5. The 3 routes must be: Route 1 = ultra-scenic/relaxed, Route 2 = culturally dense, Route 3 = fast & focused.
-6. Write like a local who has lived here 10 years. Specific, warm. Never say "charming" or "vibrant."
-7. Insider tips must be genuinely useful and specific to this exact venue.
+2. Stops must flow geographically toward {request.end_location}. Zero backtracking.
+3. Hard cap: total time (duration_mins + walk_to_next_mins for all stops) ≤ {request.time_budget_minutes} min.
+4. Write like a local who has lived here 10 years. Specific, warm. Never say "charming" or "vibrant."
+5. Insider tips must be genuinely useful and specific to this exact venue.
 
-Active vibe: {request.vibe}"""
+Active vibe / custom request: {request.vibe}"""
 
     response = openai_client.beta.chat.completions.parse(
         model="gpt-4o",
@@ -399,47 +519,76 @@ Active vibe: {request.vibe}"""
             {
                 "role": "user",
                 "content": (
-                    f"Generate 3 routes. Start: {request.start_location}. "
-                    f"End: {request.end_location}. "
-                    f"Vibe: {request.vibe}. "
-                    f"Select ONLY from the provided venue list."
+                    f"Generate ONE route matching theme '{route_type_desc}' from {request.start_location} to {request.end_location}. "
+                    f"Vibe: {request.vibe}."
                 ),
             },
         ],
-        response_format=V3ResponseLLM,
+        response_format=RouteOptionLLM,
         temperature=0.85,
     )
     return response.choices[0].message.parsed
 
 
-@traceable(name="wander_v3_fallback", run_type="llm")  # type: ignore
-def _call_openai_fallback(request: RouteRequest) -> V3ResponseLLM:
-    """Fallback when Google Places returns no results — GPT-4o generates from knowledge."""
+# ── Single Route OpenAI generation (Fallback mode) ────────────────────────────
+
+def _call_openai_fallback_single_sync(
+    request: RouteRequest,
+    route_type_desc: str,
+    previously_selected: List[str],
+    weather_info: Optional[Dict],
+    local_time: Optional[str]
+) -> RouteOptionLLM:
+    """Fallback when Google Places returns no results — GPT-4o generates a single route from knowledge."""
     _stops = 3
     _walk_per_leg_mins = 12
     _walk_allowance = _walk_per_leg_mins * _stops
     _per_stop_mins = max(15, (request.time_budget_minutes - _walk_allowance) // _stops)
 
-    system_prompt = f"""You are Wander. Generate exactly 3 distinct walking routes.
+    weather_prompt_chunk = ""
+    if weather_info:
+        weather_prompt_chunk = (
+            f"CURRENT WEATHER CONDITION: {weather_info['main']} ({weather_info['description']}), Temperature: {weather_info['temp_c']}°C.\n"
+        )
+        if weather_info["is_adverse"]:
+            weather_prompt_chunk += (
+                "IMPORTANT: It is currently raining/snowing/storming at the starting location. "
+                "You MUST prioritize indoor venues (museums, diners, bookstores) in the route.\n"
+            )
+
+    time_prompt_chunk = ""
+    if local_time:
+        time_prompt_chunk = (
+            f"CURRENT LOCAL TIME: {local_time}.\n"
+            "IMPORTANT: Recommend stops appropriate for this time of day (bars/diners for late night, cafes/bakeries for morning).\n"
+        )
+
+    exclude_prompt_chunk = ""
+    if previously_selected:
+        exclude_prompt_chunk = (
+            f"EXCLUDED VENUES: Do NOT reuse these venues: {', '.join(previously_selected)}.\n"
+        )
+
+    system_prompt = f"""You are Wander. Generate exactly ONE walking route matching this theme: {route_type_desc}.
 Your life isn't a chore; wander.
 
-Each waypoint MUST have a venue_index (use 1, 2, 3 ... sequentially across all routes).
-Set venue_index = order number of the stop globally across all routes.
+Each waypoint MUST have a venue_index. Set venue_index = order number of the stop.
 
-TIME BUDGET: {request.time_budget_minutes} minutes TOTAL per route.
-→ TARGET: Each route should USE approximately {request.time_budget_minutes} minutes.
+TIME BUDGET: {request.time_budget_minutes} minutes TOTAL.
+→ TARGET: The route should USE approximately {request.time_budget_minutes} minutes.
 → Per stop: approximately {_per_stop_mins} minutes duration_mins each.
-→ DO NOT generate short routes when given a large time budget. Fill the time.
+
+{weather_prompt_chunk}
+{time_prompt_chunk}
+{exclude_prompt_chunk}
 
 RULES:
 1. REAL PLACES ONLY. Every stop must genuinely exist with a real street address in address_hint.
    The address_hint must be a full mappable street address like "750 11th Ave, New York, NY".
 2. Stops flow geographically from origin to destination. No backtracking.
-3. Routes: Route 1 = ultra-scenic, Route 2 = culturally dense, Route 3 = fast & focused.
-4. No shared stops between routes.
-5. Hard cap: total (duration_mins + walk_to_next_mins) per route ≤ {request.time_budget_minutes} minutes.
+3. Hard cap: total (duration_mins + walk_to_next_mins) ≤ {request.time_budget_minutes} minutes.
 
-Vibe: {request.vibe}"""
+Vibe / custom request: {request.vibe}"""
 
     response = openai_client.beta.chat.completions.parse(
         model="gpt-4o",
@@ -448,16 +597,157 @@ Vibe: {request.vibe}"""
             {
                 "role": "user",
                 "content": (
-                    f"Generate 3 routes from {request.start_location} "
-                    f"to {request.end_location}. "
-                    f"Vibe: {request.vibe}. Time: {request.time_budget_minutes} min."
+                    f"Generate ONE route from {request.start_location} "
+                    f"to {request.end_location}. Vibe: {request.vibe}."
                 ),
             },
         ],
-        response_format=V3ResponseLLM,
+        response_format=RouteOptionLLM,
         temperature=0.9,
     )
     return response.choices[0].message.parsed
+
+
+async def _generate_fallback_route_single(
+    request: RouteRequest,
+    route_type_desc: str,
+    previously_selected: List[str],
+    weather_info: Optional[Dict],
+    local_time: Optional[str]
+) -> WanderRouteOptionV3:
+    """Run single route fallback generation and structure as WanderRouteOptionV3."""
+    raw_route = await asyncio.to_thread(
+        _call_openai_fallback_single_sync,
+        request,
+        route_type_desc,
+        previously_selected,
+        weather_info,
+        local_time
+    )
+    
+    waypoints_fb: List[WaypointV3] = []
+    for wp in raw_route.waypoints:
+        waypoints_fb.append(
+            WaypointV3(
+                order=wp.order,
+                location_name=f"Stop {wp.venue_index}",
+                address_hint=request.start_location,
+                google_rating=None,
+                action_description=wp.action_description,
+                duration_mins=wp.duration_mins,
+                walk_to_next_mins=0,
+                vibe_tag=wp.vibe_tag,
+                insider_tip=wp.insider_tip,
+            )
+        )
+    
+    return WanderRouteOptionV3(
+        route_name=raw_route.route_name,
+        theme_summary=raw_route.theme_summary,
+        total_walking_time_mins=sum(w.duration_mins for w in waypoints_fb),
+        initial_walk_mins=0,
+        start_location=request.start_location,
+        end_location=request.end_location,
+        start_lat=None,
+        start_lng=None,
+        end_lat=None,
+        end_lng=None,
+        waypoints=waypoints_fb,
+        navigation_deep_link=build_maps_deep_link(
+            request.start_location,
+            request.end_location,
+            [request.start_location] * len(waypoints_fb),
+        ),
+    )
+
+
+async def _enrich_route(
+    request: RouteRequest,
+    raw_route: RouteOptionLLM,
+    venues: List[Dict],
+    start_ll: Dict,
+    end_ll: Dict
+) -> WanderRouteOptionV3:
+    """Enrich LLM selected stops with Google Places details, geocodes, and walking times."""
+    waypoints: List[WaypointV3] = []
+    addresses: List[str] = []
+
+    for wp in raw_route.waypoints:
+        idx = wp.venue_index - 1
+        venue = venues[idx] if (0 <= idx < len(venues)) else None
+
+        name     = venue["name"]      if venue else f"Stop {wp.order}"
+        address  = venue["address"]   if venue else request.start_location
+        rating   = venue.get("rating")    if venue else None
+        photo_url = venue.get("photo_url") if venue else None
+        place_id = venue.get("place_id")  if venue else None
+        lat      = venue.get("lat")       if venue else None
+        lng      = venue.get("lng")       if venue else None
+
+        addresses.append(address)
+        waypoints.append(
+            WaypointV3(
+                order=wp.order,
+                location_name=name,
+                address_hint=address,
+                google_rating=rating,
+                photo_url=photo_url,
+                place_id=place_id,
+                lat=lat,
+                lng=lng,
+                action_description=wp.action_description,
+                duration_mins=wp.duration_mins,
+                walk_to_next_mins=0,  # filled below
+                vibe_tag=wp.vibe_tag,
+                insider_tip=wp.insider_tip,
+            )
+        )
+
+    # Real walking times from Directions API using coordinates to avoid mismatched text addresses
+    directions_locations = []
+    if start_ll:
+        directions_locations.append(f"{start_ll['lat']},{start_ll['lng']}")
+    else:
+        directions_locations.append(request.start_location)
+        
+    for wp in waypoints:
+        if wp.lat is not None and wp.lng is not None:
+            directions_locations.append(f"{wp.lat},{wp.lng}")
+        else:
+            directions_locations.append(wp.address_hint)
+            
+    if end_ll:
+        directions_locations.append(f"{end_ll['lat']},{end_ll['lng']}")
+    else:
+        directions_locations.append(request.end_location)
+
+    walk_times = await get_walking_times(directions_locations)
+    
+    initial_walk_mins = walk_times[0] if walk_times else 0
+    for i, wp_obj in enumerate(waypoints):
+        wp_obj.walk_to_next_mins = walk_times[i + 1] if i + 1 < len(walk_times) else 0
+
+    total_time = sum(w.duration_mins + w.walk_to_next_mins for w in waypoints) + initial_walk_mins
+
+    return WanderRouteOptionV3(
+        route_name=raw_route.route_name,
+        theme_summary=raw_route.theme_summary,
+        total_walking_time_mins=total_time,
+        initial_walk_mins=initial_walk_mins,
+        start_location=request.start_location,
+        end_location=request.end_location,
+        start_lat=start_ll["lat"] if start_ll else None,
+        start_lng=start_ll["lng"] if start_ll else None,
+        end_lat=end_ll["lat"] if end_ll else None,
+        end_lng=end_ll["lng"] if end_ll else None,
+        waypoints=waypoints,
+        navigation_deep_link=build_maps_deep_link(
+            request.start_location,
+            request.end_location,
+            [w.address_hint for w in waypoints],
+        ),
+    )
+
 
 
 # ── Endpoint ──────────────────────────────────────────────────────────────────
@@ -474,141 +764,163 @@ def root():
     }
 
 
-@app.post("/api/generate-route", response_model=WanderV3Response)
+@app.post("/api/generate-route")
 async def generate_route(request: RouteRequest):
-    try:
-        enriched_routes: List[WanderRouteOptionV3] = []
-
-        if GOOGLE_KEY:
-            # ── V3 RAG path ───────────────────────────────────────────────────
-            start_ll = await geocode_location(request.start_location)
-            end_ll   = await geocode_location(request.end_location)
+    async def event_generator():
+        try:
+            # 1. Geocode
+            yield "data: " + json.dumps({"type": "status", "message": "pinpointing locations..."}) + "\n\n"
+            await asyncio.sleep(0.05)
+            
+            start_ll = None
+            end_ll = None
+            if GOOGLE_KEY:
+                start_ll = await geocode_location(request.start_location)
+                end_ll   = await geocode_location(request.end_location)
+            
             if not start_ll:
-                start_ll = {"lat": 40.7580, "lng": -73.9855}  # NYC midtown default
+                start_ll = {"lat": 40.7580, "lng": -73.9855}
             if not end_ll:
                 end_ll = start_ll
 
-            venues = await fetch_candidate_venues(start_ll, end_ll, request.vibe)
+            # 2. Weather
+            yield "data: " + json.dumps({"type": "status", "message": "checking local weather..."}) + "\n\n"
+            weather_info = await _get_weather(start_ll["lat"], start_ll["lng"])
+            weather_text = ""
+            if weather_info:
+                weather_text = f"{weather_info['main']}, {weather_info['temp_c']}°C"
+                yield "data: " + json.dumps({"type": "weather", "weather_context": weather_text}) + "\n\n"
 
-            if venues:
-                raw = _call_openai_rag(request, venues)
-
-                for raw_route in raw.routes:
-                    waypoints: List[WaypointV3] = []
-                    addresses: List[str] = []
-
-                    for wp in raw_route.waypoints:
-                        idx = wp.venue_index - 1
-                        venue = venues[idx] if (0 <= idx < len(venues)) else None
-
-                        name     = venue["name"]      if venue else f"Stop {wp.order}"
-                        address  = venue["address"]   if venue else request.start_location
-                        rating   = venue.get("rating")    if venue else None
-                        photo_url = venue.get("photo_url") if venue else None
-                        place_id = venue.get("place_id")  if venue else None
-                        lat      = venue.get("lat")       if venue else None
-                        lng      = venue.get("lng")       if venue else None
-
-                        addresses.append(address)
-                        waypoints.append(
-                            WaypointV3(
-                                order=wp.order,
-                                location_name=name,
-                                address_hint=address,
-                                google_rating=rating,
-                                photo_url=photo_url,
-                                place_id=place_id,
-                                lat=lat,
-                                lng=lng,
-                                action_description=wp.action_description,
-                                duration_mins=wp.duration_mins,
-                                walk_to_next_mins=0,  # filled below
-                                vibe_tag=wp.vibe_tag,
-                                insider_tip=wp.insider_tip,
-                            )
-                        )
-
-                    # Real walking times from Directions API
-                    full_addresses = [request.start_location] + addresses + [request.end_location]
-                    walk_times = await get_walking_times(full_addresses)
-                    
-                    initial_walk_mins = walk_times[0] if walk_times else 0
-                    for i, wp_obj in enumerate(waypoints):
-                        wp_obj.walk_to_next_mins = walk_times[i + 1] if i + 1 < len(walk_times) else 0
-
-                    total_time = sum(w.duration_mins + w.walk_to_next_mins for w in waypoints) + initial_walk_mins
-
-                    enriched_routes.append(
-                        WanderRouteOptionV3(
-                            route_name=raw_route.route_name,
-                            theme_summary=raw_route.theme_summary,
-                            total_walking_time_mins=total_time,
-                            initial_walk_mins=initial_walk_mins,
-                            start_lat=start_ll["lat"] if start_ll else None,
-                            start_lng=start_ll["lng"] if start_ll else None,
-                            end_lat=end_ll["lat"] if end_ll else None,
-                            end_lng=end_ll["lng"] if end_ll else None,
-                            waypoints=waypoints,
-                            navigation_deep_link=build_maps_deep_link(
-                                request.start_location,
-                                request.end_location,
-                                [w.address_hint for w in waypoints],
-                            ),
-                        )
-                    )
-
-        if not enriched_routes:
-            # ── Fallback path (no Google key or no Places results) ────────────
-            raw_fb = _call_openai_fallback(request)
-            # raw_fb is now V3ResponseLLM — venue_index maps to a fake venue list
-            # We just use location_name from the prompt context (GPT-4o puts real names there)
-            # For fallback we treat venue_index as a sequential counter and use
-            # the waypoint fields directly from action_description + insider_tip
-            for raw_route in raw_fb.routes:
-                # Build a synthetic venue list from the LLM's own waypoints
-                waypoints_fb: List[WaypointV3] = []
-                for wp in raw_route.waypoints:
-                    # In fallback mode, venue_index is 1-based stop order
-                    # GPT-4o writes the location name and address in the description
-                    # We extract them from a parallel synthetic venue list
-                    waypoints_fb.append(
-                        WaypointV3(
-                            order=wp.order,
-                            location_name=f"Stop {wp.venue_index}",
-                            address_hint=request.start_location,
-                            google_rating=None,
-                            action_description=wp.action_description,
-                            duration_mins=wp.duration_mins,
-                            walk_to_next_mins=0,
-                            vibe_tag=wp.vibe_tag,
-                            insider_tip=wp.insider_tip,
-                        )
-                    )
-                enriched_routes.append(
-                    WanderRouteOptionV3(
-                        route_name=raw_route.route_name,
-                        theme_summary=raw_route.theme_summary,
-                        total_walking_time_mins=sum(
-                            w.duration_mins for w in waypoints_fb
-                        ),
-                        initial_walk_mins=0,
-                        start_lat=None,
-                        start_lng=None,
-                        end_lat=None,
-                        end_lng=None,
-                        waypoints=waypoints_fb,
-                        navigation_deep_link=build_maps_deep_link(
-                            request.start_location,
-                            request.end_location,
-                            [request.start_location] * len(waypoints_fb),
-                        ),
-                    )
+            venues = []
+            if GOOGLE_KEY:
+                yield "data: " + json.dumps({"type": "status", "message": "searching for verified venues..."}) + "\n\n"
+                # Check for custom vibe and extract queries if needed
+                is_custom = request.vibe not in VIBE_QUERIES
+                if is_custom:
+                    yield "data: " + json.dumps({"type": "status", "message": f"interpreting custom vibe: '{request.vibe}'..."}) + "\n\n"
+                    queries = await _extract_custom_queries(request.vibe)
+                else:
+                    queries = VIBE_QUERIES[request.vibe]
+                
+                # Fetch candidate venues
+                center = _midpoint(start_ll, end_ll) if end_ll else start_ll
+                lat, lng = center["lat"], center["lng"]
+                results = await asyncio.gather(
+                    *[_places_search_text(q, lat, lng) for q in queries],
+                    return_exceptions=True,
                 )
+                seen = set()
+                for batch in results:
+                    if isinstance(batch, list):
+                        for place in batch:
+                            pid = place.get("place_id") or place.get("name", "")
+                            if pid and pid not in seen and place.get("name"):
+                                seen.add(pid)
+                                venues.append(place)
+                venues.sort(key=lambda x: x.get("rating") or 0, reverse=True)
+                venues = venues[:20]
 
-        return WanderV3Response(routes=enriched_routes)
+            route_types = [
+                ("Route 1 (scenic & relaxed)", "scenic/relaxed walking experience"),
+                ("Route 2 (culturally dense)", "culturally rich itinerary with bookstores, galleries, or history"),
+                ("Route 3 (focused & social)", "highly social, focused, and lively path")
+            ]
 
+            previously_selected = []
+            
+            if GOOGLE_KEY and venues:
+                # ── RAG route generation ──
+                for idx, (route_label, route_type_desc) in enumerate(route_types):
+                    yield "data: " + json.dumps({"type": "status", "message": f"curating {route_label}..."}) + "\n\n"
+                    try:
+                        raw_route = await asyncio.to_thread(
+                            _call_openai_single_route_sync,
+                            request,
+                            venues,
+                            route_type_desc,
+                            previously_selected,
+                            weather_info,
+                            request.local_time
+                        )
+                        enriched = await _enrich_route(request, raw_route, venues, start_ll, end_ll)
+                        for wp in enriched.waypoints:
+                            if wp.location_name:
+                                previously_selected.append(wp.location_name)
+                                
+                        yield "data: " + json.dumps({
+                            "type": "route",
+                            "index": idx,
+                            "route": enriched.model_dump()
+                        }) + "\n\n"
+                    except Exception as e:
+                        print(f"Error curating RAG {route_label}: {e}")
+                        fallback_route = await _generate_fallback_route_single(
+                            request=request,
+                            route_type_desc=route_type_desc,
+                            previously_selected=previously_selected,
+                            weather_info=weather_info,
+                            local_time=request.local_time
+                        )
+                        for wp in fallback_route.waypoints:
+                            previously_selected.append(wp.location_name)
+                        yield "data: " + json.dumps({
+                            "type": "route",
+                            "index": idx,
+                            "route": fallback_route.model_dump()
+                        }) + "\n\n"
+            else:
+                # ── Fallback route generation (no Google key or no candidates) ──
+                for idx, (route_label, route_type_desc) in enumerate(route_types):
+                    yield "data: " + json.dumps({"type": "status", "message": f"curating {route_label}..."}) + "\n\n"
+                    try:
+                        fallback_route = await _generate_fallback_route_single(
+                            request=request,
+                            route_type_desc=route_type_desc,
+                            previously_selected=previously_selected,
+                            weather_info=weather_info,
+                            local_time=request.local_time
+                        )
+                        for wp in fallback_route.waypoints:
+                            previously_selected.append(wp.location_name)
+                        yield "data: " + json.dumps({
+                            "type": "route",
+                            "index": idx,
+                            "route": fallback_route.model_dump()
+                        }) + "\n\n"
+                    except Exception as e:
+                        print(f"Error curating fallback {route_label}: {e}")
+
+            yield "data: " + json.dumps({"type": "done"}) + "\n\n"
+            
+        except Exception as e:
+            print(f"Streaming error: {e}")
+            yield "data: " + json.dumps({"type": "error", "detail": str(e)}) + "\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.post("/api/shares")
+def create_share(request: ShareRequest):
+    try:
+        share_id = database.save_route(request.route.model_dump(), request.vibe)
+        return {"id": share_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/shares/{id}", response_model=WanderV3Response)
+def get_share(id: str):
+    try:
+        route_data = database.get_route(id)
+        if not route_data:
+            raise HTTPException(status_code=404, detail="Route not found")
+        # Return as a list of routes with a single element
+        return WanderV3Response(routes=[WanderRouteOptionV3(**route_data)])
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/reverse-geocode")
 async def reverse_geocode(lat: float, lng: float):
