@@ -83,6 +83,13 @@ VIBE_QUERIES: Dict[str, List[str]] = {
         "night market pop-up",
         "neighborhood bar local craft beer",
     ],
+    "Mental Break": [
+        "specialty coffee roaster cafe",
+        "pocket park urban garden",
+        "quiet community garden",
+        "scenic overlook waterfront",
+        "bakery local pastry",
+    ],
 }
 
 # ── Pydantic Models ───────────────────────────────────────────────────────────
@@ -277,6 +284,22 @@ def _midpoint(a: Dict[str, float], b: Dict[str, float]) -> Dict[str, float]:
     return {"lat": (a["lat"] + b["lat"]) / 2, "lng": (a["lng"] + b["lng"]) / 2}
 
 
+def _coordinate_distance_m(a: Dict[str, float], b: Dict[str, float]) -> float:
+    """Return approximate distance in meters between two lat/lng pairs using Haversine formula."""
+    import math
+    lat1, lng1 = a["lat"], a["lng"]
+    lat2, lng2 = b["lat"], b["lng"]
+    R = 6371000.0  # earth radius in meters
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlng = math.radians(lng2 - lng1)
+    
+    a_val = math.sin(dphi/2.0)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlng/2.0)**2
+    c = 2.0 * math.atan2(math.sqrt(a_val), math.sqrt(1.0 - a_val))
+    return R * c
+
+
 # ── Google Places API (New) ───────────────────────────────────────────────────
 
 async def _places_search_text(query: str, lat: float, lng: float, radius_m: float = 2000.0) -> List[Dict]:
@@ -345,7 +368,7 @@ async def _places_search_text(query: str, lat: float, lng: float, radius_m: floa
         return []
 
 
-async def fetch_candidate_venues(start_ll: Dict, end_ll: Optional[Dict], vibe: str) -> List[Dict]:
+async def fetch_candidate_venues(start_ll: Dict, end_ll: Optional[Dict], vibe: str, time_budget_minutes: int = 90) -> List[Dict]:
     """
     Run all vibe-appropriate Places queries in parallel, centered on the route MIDPOINT.
     Uses strict locationRestriction so venues are guaranteed near the route corridor.
@@ -357,8 +380,26 @@ async def fetch_candidate_venues(start_ll: Dict, end_ll: Optional[Dict], vibe: s
     center = _midpoint(start_ll, end_ll) if end_ll else start_ll
     lat, lng = center["lat"], center["lng"]
 
+    # Dynamic search radius calculation
+    if end_ll:
+        dist_m = _coordinate_distance_m(start_ll, end_ll)
+    else:
+        dist_m = 0.0
+    
+    is_round_trip = dist_m < 50.0 or end_ll is None
+    time_scale_radius = (time_budget_minutes / 30.0) * 500.0
+    
+    if is_round_trip:
+        # Loop / Round Trip: search radius based solely on time budget
+        radius_m = max(1000.0, min(5000.0, (time_budget_minutes / 30.0) * 1000.0))
+        center = start_ll
+        lat, lng = center["lat"], center["lng"]
+    else:
+        # Progression route: radius scales with distance and time budget
+        radius_m = max(500.0, min(3000.0, (dist_m / 3.0) * 0.7 + time_scale_radius * 0.3))
+
     results = await asyncio.gather(
-        *[_places_search_text(q, lat, lng) for q in queries],
+        *[_places_search_text(q, lat, lng, radius_m=radius_m) for q in queries],
         return_exceptions=True,
     )
 
@@ -474,12 +515,13 @@ def _call_openai_single_route_sync(
 
     time_prompt_chunk = ""
     if local_time:
-        time_prompt_chunk = (
-            f"CURRENT LOCAL TIME: {local_time}.\n"
-            "IMPORTANT: Tailor the recommended stops to this time of day. "
-            "For example, if it is late night (e.g. after 8 PM), do not recommend coffee shops or bookstores that close early; "
-            "instead suggest bars, evening diners, or late-night dessert spots. If it is morning, suggest coffee shops and breakfast spots.\n"
-        )
+        time_prompt_chunk = f"CURRENT LOCAL TIME: {local_time}.\n"
+    time_prompt_chunk += (
+        "IMPORTANT: Tailor the recommended stops to the time of day. "
+        "For example, if it is late night (e.g. after 8 PM), do not recommend coffee shops or bookstores that close early; "
+        "instead suggest bars, evening diners, or late-night dessert spots. If it is morning, suggest coffee shops and breakfast spots.\n"
+        "DAYPART TRANSITIONING RULE: If the time budget spans across major dayparts (e.g., starting at 4:00 PM for 3 hours), logically sequence the stops to transition with the day (e.g., afternoon activity -> sunset view -> dinner/evening drinks). Do not suggest coffee shops at 7 PM.\n"
+    )
 
     exclude_prompt_chunk = ""
     if previously_selected:
@@ -510,6 +552,8 @@ STRICT RULES:
 3. Hard cap: total time (duration_mins + walk_to_next_mins for all stops) ≤ {request.time_budget_minutes} min.
 4. Write like a local who has lived here 10 years. Specific, warm. Never say "charming" or "vibrant."
 5. Insider tips must be genuinely useful and specific to this exact venue.
+6. Culinary Targeting: If the user's custom vibe explicitly mentions specific cuisines, high-end dining, or specific food items, you MUST heavily weight your selection toward venues in the verified list that match this, ignoring generic stops.
+7. Accessibility: If the user requests wheelchair accessibility or 'no stairs', you must explicitly select venues that are accessible and plan routes that avoid known steep inclines or stairways based on your geographic knowledge.
 
 Active vibe / custom request: {request.vibe}"""
 
@@ -531,135 +575,7 @@ Active vibe / custom request: {request.vibe}"""
     return response.choices[0].message.parsed
 
 
-# ── Single Route OpenAI generation (Fallback mode) ────────────────────────────
 
-def _call_openai_fallback_single_sync(
-    request: RouteRequest,
-    route_type_desc: str,
-    previously_selected: List[str],
-    weather_info: Optional[Dict],
-    local_time: Optional[str]
-) -> RouteOptionLLM:
-    """Fallback when Google Places returns no results — GPT-4o generates a single route from knowledge."""
-    _stops = 3
-    _walk_per_leg_mins = 12
-    _walk_allowance = _walk_per_leg_mins * _stops
-    _per_stop_mins = max(15, (request.time_budget_minutes - _walk_allowance) // _stops)
-
-    weather_prompt_chunk = ""
-    if weather_info:
-        weather_prompt_chunk = (
-            f"CURRENT WEATHER CONDITION: {weather_info['main']} ({weather_info['description']}), Temperature: {weather_info['temp_c']}°C.\n"
-        )
-        if weather_info["is_adverse"]:
-            weather_prompt_chunk += (
-                "IMPORTANT: It is currently raining/snowing/storming at the starting location. "
-                "You MUST prioritize indoor venues (museums, diners, bookstores) in the route.\n"
-            )
-
-    time_prompt_chunk = ""
-    if local_time:
-        time_prompt_chunk = (
-            f"CURRENT LOCAL TIME: {local_time}.\n"
-            "IMPORTANT: Recommend stops appropriate for this time of day (bars/diners for late night, cafes/bakeries for morning).\n"
-        )
-
-    exclude_prompt_chunk = ""
-    if previously_selected:
-        exclude_prompt_chunk = (
-            f"EXCLUDED VENUES: Do NOT reuse these venues: {', '.join(previously_selected)}.\n"
-        )
-
-    system_prompt = f"""You are Wander. Generate exactly ONE walking route matching this theme: {route_type_desc}.
-Your life isn't a chore; wander.
-
-Each waypoint MUST have a venue_index. Set venue_index = order number of the stop.
-
-TIME BUDGET: {request.time_budget_minutes} minutes TOTAL.
-→ TARGET: The route should USE approximately {request.time_budget_minutes} minutes.
-→ Per stop: approximately {_per_stop_mins} minutes duration_mins each.
-
-{weather_prompt_chunk}
-{time_prompt_chunk}
-{exclude_prompt_chunk}
-
-RULES:
-1. REAL PLACES ONLY. Every stop must genuinely exist with a real street address in address_hint.
-   The address_hint must be a full mappable street address like "750 11th Ave, New York, NY".
-2. Stops flow geographically from origin to destination. No backtracking.
-3. Hard cap: total (duration_mins + walk_to_next_mins) ≤ {request.time_budget_minutes} minutes.
-
-Vibe / custom request: {request.vibe}"""
-
-    response = openai_client.beta.chat.completions.parse(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": (
-                    f"Generate ONE route from {request.start_location} "
-                    f"to {request.end_location}. Vibe: {request.vibe}."
-                ),
-            },
-        ],
-        response_format=RouteOptionLLM,
-        temperature=0.9,
-    )
-    return response.choices[0].message.parsed
-
-
-async def _generate_fallback_route_single(
-    request: RouteRequest,
-    route_type_desc: str,
-    previously_selected: List[str],
-    weather_info: Optional[Dict],
-    local_time: Optional[str]
-) -> WanderRouteOptionV3:
-    """Run single route fallback generation and structure as WanderRouteOptionV3."""
-    raw_route = await asyncio.to_thread(
-        _call_openai_fallback_single_sync,
-        request,
-        route_type_desc,
-        previously_selected,
-        weather_info,
-        local_time
-    )
-    
-    waypoints_fb: List[WaypointV3] = []
-    for wp in raw_route.waypoints:
-        waypoints_fb.append(
-            WaypointV3(
-                order=wp.order,
-                location_name=f"Stop {wp.venue_index}",
-                address_hint=request.start_location,
-                google_rating=None,
-                action_description=wp.action_description,
-                duration_mins=wp.duration_mins,
-                walk_to_next_mins=0,
-                vibe_tag=wp.vibe_tag,
-                insider_tip=wp.insider_tip,
-            )
-        )
-    
-    return WanderRouteOptionV3(
-        route_name=raw_route.route_name,
-        theme_summary=raw_route.theme_summary,
-        total_walking_time_mins=sum(w.duration_mins for w in waypoints_fb),
-        initial_walk_mins=0,
-        start_location=request.start_location,
-        end_location=request.end_location,
-        start_lat=None,
-        start_lng=None,
-        end_lat=None,
-        end_lng=None,
-        waypoints=waypoints_fb,
-        navigation_deep_link=build_maps_deep_link(
-            request.start_location,
-            request.end_location,
-            [request.start_location] * len(waypoints_fb),
-        ),
-    )
 
 
 async def _enrich_route(
@@ -784,6 +700,43 @@ async def generate_route(request: RouteRequest):
             if not end_ll:
                 end_ll = start_ll
 
+            # 1.5. Base Walk Sanity Check
+            yield "data: " + json.dumps({"type": "status", "message": "verifying distance feasibility..."}) + "\n\n"
+            dist_m = _coordinate_distance_m(start_ll, end_ll)
+            base_walk_mins = 0
+            if dist_m > 100.0:  # Only check if they are not the same place
+                try:
+                    async with httpx.AsyncClient(timeout=5.0) as client:
+                        res = await client.get(
+                            "https://maps.googleapis.com/maps/api/directions/json",
+                            params={
+                                "origin": f"{start_ll['lat']},{start_ll['lng']}",
+                                "destination": f"{end_ll['lat']},{end_ll['lng']}",
+                                "mode": "walking",
+                                "key": GOOGLE_KEY,
+                            },
+                        )
+                        data = res.json()
+                        if data.get("status") == "OK":
+                            secs = data["routes"][0]["legs"][0]["duration"]["value"]
+                            base_walk_mins = round(secs / 60)
+                        else:
+                            base_walk_mins = int((dist_m * 1.3) / 80.0)
+                except Exception:
+                    base_walk_mins = int((dist_m * 1.3) / 80.0)
+
+            # We need to leave at least 15 minutes of stop buffer time
+            min_buffer_mins = 15
+            if base_walk_mins > (request.time_budget_minutes - min_buffer_mins):
+                h = base_walk_mins // 60
+                m = base_walk_mins % 60
+                time_str = f"{h}h {m}m" if h > 0 else f"{m} mins"
+                raise Exception(
+                    f"Your start and end locations are too far apart to walk within your time budget. "
+                    f"It would take approximately {time_str} just to walk directly between them (leaving no time for stops). "
+                    f"Try picking closer locations or increasing your time budget."
+                )
+
             # 2. Weather
             yield "data: " + json.dumps({"type": "status", "message": "checking local weather..."}) + "\n\n"
             weather_info = await _get_weather(start_ll["lat"], start_ll["lng"])
@@ -793,18 +746,34 @@ async def generate_route(request: RouteRequest):
                 yield "data: " + json.dumps({"type": "weather", "weather_context": weather_text}) + "\n\n"
 
             venues = []
-            if GOOGLE_KEY:
-                yield "data: " + json.dumps({"type": "status", "message": "searching for verified venues..."}) + "\n\n"
-                # Check for custom vibe and extract queries if needed
-                is_custom = request.vibe not in VIBE_QUERIES
-                if is_custom:
-                    yield "data: " + json.dumps({"type": "status", "message": f"interpreting custom vibe: '{request.vibe}'..."}) + "\n\n"
-                    queries = await _extract_custom_queries(request.vibe)
-                else:
-                    queries = VIBE_QUERIES[request.vibe]
+            if not GOOGLE_KEY:
+                raise Exception("Google Maps API Key not configured")
+
+            yield "data: " + json.dumps({"type": "status", "message": "searching for verified venues..."}) + "\n\n"
+            
+            # Check for custom vibe and extract queries if needed
+            is_custom = request.vibe not in VIBE_QUERIES
+            if is_custom:
+                yield "data: " + json.dumps({"type": "status", "message": f"interpreting custom vibe: '{request.vibe}'..."}) + "\n\n"
+                queries = await _extract_custom_queries(request.vibe)
+            else:
+                queries = VIBE_QUERIES[request.vibe]
+            
+            # 1. Dynamic Radius & Loop Check
+            dist_m = _coordinate_distance_m(start_ll, end_ll)
+            is_round_trip = dist_m < 50.0  # Identical or near-identical start and end
+            
+            time_scale_radius = (request.time_budget_minutes / 30.0) * 500.0
+            
+            if is_round_trip:
+                # Loop / Round Trip: search radius based solely on time budget, centered on start
+                radius_m = max(1000.0, min(5000.0, time_scale_radius))
+                centers = [start_ll]
+                print(f"Round Trip detected. Radius: {radius_m:.0f}m, Center: {start_ll}")
+            else:
+                # Progression route: radius scales with distance and time budget
+                radius_m = max(500.0, min(3000.0, (dist_m / 3.0) * 0.7 + time_scale_radius * 0.3))
                 
-                # Define search centers along the journey: 25%, 50% (midpoint), 75%
-                # This ensures candidates are geographically distributed along the entire route corridor
                 def interpolate(a, b, fraction):
                     return {
                         "lat": a["lat"] + (b["lat"] - a["lat"]) * fraction,
@@ -816,24 +785,28 @@ async def generate_route(request: RouteRequest):
                     interpolate(start_ll, end_ll, 0.50),
                     interpolate(start_ll, end_ll, 0.75),
                 ]
-                
-                tasks = []
-                # Search with 1000m radius around each center to keep recommendations focused near the corridor
-                for center in centers:
-                    for q in queries:
-                        tasks.append(_places_search_text(q, center["lat"], center["lng"], radius_m=1000.0))
-                
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                seen = set()
-                for batch in results:
-                    if isinstance(batch, list):
-                        for place in batch:
-                            pid = place.get("place_id") or place.get("name", "")
-                            if pid and pid not in seen and place.get("name"):
-                                seen.add(pid)
-                                
-                                # Compute vector progression percentage along the start -> end vector
+                print(f"Progression route. Distance: {dist_m:.0f}m, Radius: {radius_m:.0f}m, Centers: 3 points")
+
+            tasks = []
+            for center in centers:
+                for q in queries:
+                    tasks.append(_places_search_text(q, center["lat"], center["lng"], radius_m=radius_m))
+            
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            seen = set()
+            for batch in results:
+                if isinstance(batch, list):
+                    for place in batch:
+                        pid = place.get("place_id") or place.get("name", "")
+                        if pid and pid not in seen and place.get("name"):
+                            seen.add(pid)
+                            
+                            # Compute vector progression percentage along the start -> end vector
+                            if is_round_trip:
+                                # For a loop route, progression along the line doesn't apply (all points near start)
+                                progression = 0.0
+                            else:
                                 v_lat = end_ll["lat"] - start_ll["lat"]
                                 v_lng = end_ll["lng"] - start_ll["lng"]
                                 u_lat = place["lat"] - start_ll["lat"]
@@ -842,16 +815,20 @@ async def generate_route(request: RouteRequest):
                                 dot_product = u_lat * v_lat + u_lng * v_lng
                                 vector_sq_len = v_lat**2 + v_lng**2
                                 progression = dot_product / vector_sq_len if vector_sq_len > 0 else 0.0
-                                
-                                place["progression"] = max(0.0, min(1.0, progression))
-                                venues.append(place)
-                
-                # Sort by rating and keep top 25 candidates to provide a rich spatial spread
-                venues.sort(key=lambda x: x.get("rating") or 0, reverse=True)
-                venues = venues[:25]
-                
-                # Sort the final candidates by geographical progression to prevent backtracking and ease LLM sequencing
-                venues.sort(key=lambda x: x.get("progression", 0.0))
+                            
+                            place["progression"] = max(0.0, min(1.0, progression))
+                            venues.append(place)
+            
+            # Raise an explicit exception if we cannot construct a valid RAG route
+            if len(venues) < 3:
+                raise Exception("We couldn't find enough verified venues matching this vibe in this exact area. Try expanding your search or changing the vibe.")
+
+            # Sort by rating and keep top 25 candidates to provide a rich spatial spread
+            venues.sort(key=lambda x: x.get("rating") or 0, reverse=True)
+            venues = venues[:25]
+            
+            # Sort the final candidates by geographical progression to prevent backtracking and ease LLM sequencing
+            venues.sort(key=lambda x: x.get("progression", 0.0))
 
             route_types = [
                 ("Route 1 (scenic & relaxed)", "scenic/relaxed walking experience"),
@@ -861,72 +838,38 @@ async def generate_route(request: RouteRequest):
 
             previously_selected = []
             
-            if GOOGLE_KEY and venues:
-                # ── RAG route generation ──
-                for idx, (route_label, route_type_desc) in enumerate(route_types):
-                    yield "data: " + json.dumps({"type": "status", "message": f"curating {route_label}..."}) + "\n\n"
-                    try:
-                        raw_route = await asyncio.to_thread(
-                            _call_openai_single_route_sync,
-                            request,
-                            venues,
-                            route_type_desc,
-                            previously_selected,
-                            weather_info,
-                            request.local_time
-                        )
-                        # Programmatically sort waypoints by progression to guarantee zero backtracking
+            # ── RAG route generation ──
+            for idx, (route_label, route_type_desc) in enumerate(route_types):
+                yield "data: " + json.dumps({"type": "status", "message": f"curating {route_label}..."}) + "\n\n"
+                try:
+                    raw_route = await asyncio.to_thread(
+                        _call_openai_single_route_sync,
+                        request,
+                        venues,
+                        route_type_desc,
+                        previously_selected,
+                        weather_info,
+                        request.local_time
+                    )
+                    # Programmatically sort waypoints by progression to guarantee zero backtracking (only on progression routes)
+                    if not is_round_trip:
                         raw_route.waypoints.sort(
                             key=lambda wp: venues[wp.venue_index - 1].get("progression", 0.0)
                             if (0 <= wp.venue_index - 1 < len(venues)) else 0.0
                         )
-                        enriched = await _enrich_route(request, raw_route, venues, start_ll, end_ll)
-                        for wp in enriched.waypoints:
-                            if wp.location_name:
-                                previously_selected.append(wp.location_name)
-                                
-                        yield "data: " + json.dumps({
-                            "type": "route",
-                            "index": idx,
-                            "route": enriched.model_dump()
-                        }) + "\n\n"
-                    except Exception as e:
-                        print(f"Error curating RAG {route_label}: {e}")
-                        fallback_route = await _generate_fallback_route_single(
-                            request=request,
-                            route_type_desc=route_type_desc,
-                            previously_selected=previously_selected,
-                            weather_info=weather_info,
-                            local_time=request.local_time
-                        )
-                        for wp in fallback_route.waypoints:
+                    enriched = await _enrich_route(request, raw_route, venues, start_ll, end_ll)
+                    for wp in enriched.waypoints:
+                        if wp.location_name:
                             previously_selected.append(wp.location_name)
-                        yield "data: " + json.dumps({
-                            "type": "route",
-                            "index": idx,
-                            "route": fallback_route.model_dump()
-                        }) + "\n\n"
-            else:
-                # ── Fallback route generation (no Google key or no candidates) ──
-                for idx, (route_label, route_type_desc) in enumerate(route_types):
-                    yield "data: " + json.dumps({"type": "status", "message": f"curating {route_label}..."}) + "\n\n"
-                    try:
-                        fallback_route = await _generate_fallback_route_single(
-                            request=request,
-                            route_type_desc=route_type_desc,
-                            previously_selected=previously_selected,
-                            weather_info=weather_info,
-                            local_time=request.local_time
-                        )
-                        for wp in fallback_route.waypoints:
-                            previously_selected.append(wp.location_name)
-                        yield "data: " + json.dumps({
-                            "type": "route",
-                            "index": idx,
-                            "route": fallback_route.model_dump()
-                        }) + "\n\n"
-                    except Exception as e:
-                        print(f"Error curating fallback {route_label}: {e}")
+                            
+                    yield "data: " + json.dumps({
+                        "type": "route",
+                        "index": idx,
+                        "route": enriched.model_dump()
+                    }) + "\n\n"
+                except Exception as e:
+                    print(f"Error curating RAG {route_label}: {e}")
+                    raise Exception(f"Curator encountered an error making {route_label}: {str(e)}")
 
             yield "data: " + json.dumps({"type": "done"}) + "\n\n"
             

@@ -1,7 +1,7 @@
 {
   "name": "wander",
   "short_name": "wander",
-  "description": "your city has secrets to share. wander.",
+  "description": "any city has secrets to share. wander.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#131316",

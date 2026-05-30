@@ -18,6 +18,7 @@ import {
   LocateFixed,
   Loader2,
   Share,
+  Calendar,
 } from "lucide-react";
 
 import { MapPreview } from "./components/MapPreview";
@@ -25,7 +26,7 @@ import { MapPreview } from "./components/MapPreview";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Screen = "input" | "loading" | "route";
-type VibeId = "Caffeinated & Cultured" | "Green & Scenic" | "Spontaneous & Social";
+type VibeId = "Caffeinated & Cultured" | "Green & Scenic" | "Spontaneous & Social" | "Mental Break";
 
 interface WaypointV3 {
   order: number;
@@ -104,6 +105,16 @@ const VIBES: {
     activeBg: "bg-purple-400/8",
     activeGlow: "shadow-[0_0_24px_rgba(180,160,210,0.18)]",
     activeText: "text-purple-300",
+  },
+  {
+    id: "Mental Break",
+    emoji: "⏱️",
+    label: "Mental Break",
+    sub: "Coffee · Short loops · Fresh air",
+    activeBorder: "border-sky-400/40",
+    activeBg: "bg-sky-400/8",
+    activeGlow: "shadow-[0_0_24px_rgba(125,211,252,0.18)]",
+    activeText: "text-sky-300",
   },
 ];
 
@@ -219,12 +230,12 @@ function InputScreen({
           )}
         </div>
         <h1 className="text-[2.8rem] md:text-[4.5rem] leading-[1.05] font-semibold text-[#f4f4f5] mb-5" style={{ fontFamily: "var(--font-playfair)" }}>
-          your city has<br />
+          any city has<br />
           <em className="text-[#8ba88e]">secrets</em> to share.
         </h1>
         <p className="text-[#f4f4f5]/35 text-base font-light tracking-wide max-w-sm mx-auto" style={{ fontFamily: "var(--font-inter)" }}>
           tell us where you&apos;re starting, where you need to end up, and how you feel today.
-          we&apos;ll generate three distinct routes.
+          we&apos;ll generate three distinct routes to wander them.
         </p>
       </motion.header>
 
@@ -238,7 +249,7 @@ function InputScreen({
         <div className="glass rounded-3xl p-7 shadow-2xl">
           {/* Locations */}
           <div className="mb-7 space-y-1">
-            <div className="flex items-center gap-3.5 py-3.5 px-1 border-b border-[#f4f4f5]/6">
+            <div className="flex items-center gap-3.5 py-3.5 px-1 border-b border-[#f4f4f5]/6 focus-within:border-[#8ba88e]/40 transition-colors duration-300">
               <MapPin className="w-4 h-4 text-[#8ba88e] shrink-0" strokeWidth={1.5} />
               <input
                 id="start-location"
@@ -258,11 +269,19 @@ function InputScreen({
                 {isLocating ? <Loader2 className="w-4 h-4 animate-spin" /> : <LocateFixed className="w-4 h-4" strokeWidth={1.5} />}
               </button>
             </div>
-            <div className="flex items-center pl-[7px] py-1 gap-3.5">
+            <div className="flex items-center pl-[7px] py-1 gap-3.5 relative">
               <div className="w-2 h-2 rounded-full border border-[#f4f4f5]/15 shrink-0" />
               <div className="h-px flex-1 border-t border-dashed border-[#f4f4f5]/6" />
+              <button
+                type="button"
+                onClick={() => setEnd(start)}
+                className="absolute right-1 p-1.5 hover:bg-[#8ba88e]/10 text-xs rounded-full border border-[#f4f4f5]/10 bg-[#131316] text-[#8ba88e] transition-colors flex items-center justify-center"
+                title="Round trip (loop back to start)"
+              >
+                🔁
+              </button>
             </div>
-            <div className="flex items-center gap-3.5 py-3.5 px-1">
+            <div className="flex items-center gap-3.5 py-3.5 px-1 border-b border-transparent focus-within:border-[#e5d3b3]/40 transition-colors duration-300">
               <MapPin className="w-4 h-4 text-[#e5d3b3] shrink-0" strokeWidth={1.5} />
               <input
                 id="end-location"
@@ -306,7 +325,7 @@ function InputScreen({
             <p className="text-[#f4f4f5]/40 text-[12px] font-medium tracking-widest uppercase mb-4" style={{ fontFamily: "var(--font-inter)" }}>
               your vibe
             </p>
-            <div className="grid grid-cols-3 gap-2.5 mb-4">
+            <div className="grid grid-cols-2 gap-2.5 mb-4">
               {VIBES.map((v) => {
                 const isSelected = vibe === v.id;
                 return (
@@ -351,7 +370,7 @@ function InputScreen({
                 className={`w-full p-4 rounded-2xl border bg-[#f4f4f5]/3 placeholder-[#f4f4f5]/20 text-[13px] font-light tracking-wide focus:outline-none min-h-[72px] resize-none transition-all duration-300 ${
                   customVibe.trim()
                     ? "border-[#8ba88e]/40 bg-[#8ba88e]/5 shadow-[0_0_24px_rgba(139,168,142,0.1)]"
-                    : "border-[#f4f4f5]/6 hover:border-[#f4f4f5]/10"
+                    : "border-[#f4f4f5]/6 hover:border-[#f4f4f5]/10 focus:border-[#8ba88e]/40 focus:bg-[#8ba88e]/2"
                 }`}
                 style={{ fontFamily: "var(--font-inter)" }}
               />
@@ -374,7 +393,14 @@ function InputScreen({
             style={{ fontFamily: "var(--font-inter)" }}
           >
             {canWander ? (
-              <><span>generate three routes</span><ArrowRight className="w-4 h-4" strokeWidth={2} /></>
+              <>
+                <span>
+                  {start.trim() === end.trim() && start.trim() !== ""
+                    ? "generate three round-trip loops"
+                    : "generate three routes"}
+                </span>
+                <ArrowRight className="w-4 h-4" strokeWidth={2} />
+              </>
             ) : (
               "fill in the details above"
             )}
@@ -469,7 +495,7 @@ function WaypointCard({ waypoint }: { waypoint: WaypointV3 }) {
             <div
               className="absolute inset-0"
               style={{
-                background: "linear-gradient(to bottom, transparent 40%, #1E1E24 100%)",
+                background: "linear-gradient(to bottom, transparent 40%, #131316 100%)",
               }}
             />
             {/* vibe tag floated over the photo */}
@@ -686,6 +712,69 @@ export function RouteScreen({
     }
   };
 
+  const handleAddToCalendar = (route: WanderRouteOptionV3) => {
+    if (!route) return;
+
+    const eventStart = new Date();
+    const eventEnd = new Date(eventStart.getTime() + route.total_walking_time_mins * 60 * 1000);
+
+    const formatIcsDate = (date: Date) => {
+      return date.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+    };
+
+    const dtStart = formatIcsDate(eventStart);
+    const dtEnd = formatIcsDate(eventEnd);
+    const dtStamp = formatIcsDate(new Date());
+
+    const descriptionLines = [
+      route.theme_summary,
+      "",
+      "Waypoints:",
+      ...route.waypoints.map(
+        (wp, idx) => `${idx + 1}. ${wp.location_name} - ${wp.address_hint} (${wp.duration_mins} mins)`
+      )
+    ];
+
+    const cleanIcsValue = (str: string) => {
+      return str
+        .replace(/\\/g, "\\\\")
+        .replace(/,/g, "\\,")
+        .replace(/;/g, "\\;")
+        .replace(/\n/g, "\\n");
+    };
+
+    const cleanedLines = descriptionLines.map(line => cleanIcsValue(line));
+    const descriptionField = cleanedLines.join("\\n");
+
+    const icsContent = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Wander App//Wander Route//EN",
+      "CALSCALE:GREGORIAN",
+      "METHOD:PUBLISH",
+      "BEGIN:VEVENT",
+      `UID:${Date.now()}@wander.app`,
+      `DTSTAMP:${dtStamp}`,
+      `DTSTART:${dtStart}`,
+      `DTEND:${dtEnd}`,
+      `SUMMARY:${cleanIcsValue(route.route_name)}`,
+      `DESCRIPTION:${descriptionField}`,
+      `LOCATION:${cleanIcsValue(route.start_location || "")}`,
+      "END:VEVENT",
+      "END:VCALENDAR"
+    ].join("\r\n");
+
+    const blob = new Blob([icsContent], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${route.route_name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.ics`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const formatTime = (mins: number) => {
     const h = Math.floor(mins / 60);
     const m = mins % 60;
@@ -765,10 +854,11 @@ export function RouteScreen({
                     />
                   )}
                   <span
-                    className={`relative z-10 text-[11px] font-semibold leading-tight block tracking-wide ${
-                      selectedIndex === i ? "text-[#8ba88e]" : "text-[#f4f4f5]/35"
+                    className={`relative z-10 text-[11px] font-semibold leading-tight block tracking-wide transition-colors truncate max-w-full ${
+                      selectedIndex === i ? "text-[#8ba88e]" : "text-[#f4f4f5]/35 hover:text-[#f4f4f5]/65"
                     }`}
                     style={{ fontFamily: "var(--font-inter)" }}
+                    title={tabTitle}
                   >
                     {tabTitle}
                   </span>
@@ -969,20 +1059,32 @@ export function RouteScreen({
           </button>
 
           {!isSharedView && !isGenerating && activeRoute && (
-            <button
-              id="share-route-button"
-              onClick={handleShare}
-              disabled={isSharing}
-              className="flex items-center gap-2.5 px-6 py-3 rounded-2xl bg-[#8ba88e]/10 border border-[#8ba88e]/20 text-[#8ba88e] text-[13px] font-medium hover:bg-[#8ba88e]/25 transition-all duration-300 disabled:opacity-50"
-              style={{ fontFamily: "var(--font-inter)" }}
-            >
-              {isSharing ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Share className="w-3.5 h-3.5" />
-              )}
-              {shareUrl ? "link copied!" : "share this route"}
-            </button>
+            <>
+              <button
+                id="share-route-button"
+                onClick={handleShare}
+                disabled={isSharing}
+                className="flex items-center gap-2.5 px-6 py-3 rounded-2xl bg-[#8ba88e]/10 border border-[#8ba88e]/20 text-[#8ba88e] text-[13px] font-medium hover:bg-[#8ba88e]/25 transition-all duration-300 disabled:opacity-50"
+                style={{ fontFamily: "var(--font-inter)" }}
+              >
+                {isSharing ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Share className="w-3.5 h-3.5" />
+                )}
+                {shareUrl ? "link copied!" : "share this route"}
+              </button>
+
+              <button
+                id="add-to-calendar-button"
+                onClick={() => handleAddToCalendar(activeRoute)}
+                className="flex items-center gap-2.5 px-6 py-3 rounded-2xl bg-[#e5d3b3]/10 border border-[#e5d3b3]/20 text-[#e5d3b3] text-[13px] font-medium hover:bg-[#e5d3b3]/25 transition-all duration-300"
+                style={{ fontFamily: "var(--font-inter)" }}
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                Add to Calendar
+              </button>
+            </>
           )}
         </motion.div>
       </div>
@@ -1116,27 +1218,30 @@ export default function Home() {
           const trimmed = line.trim();
           if (!trimmed || !trimmed.startsWith("data: ")) continue;
 
+          let data;
           try {
-            const data = JSON.parse(trimmed.slice(6));
-            if (data.type === "status") {
-              setLoadingMsg(data.message);
-            } else if (data.type === "weather") {
-              setWeatherContext(data.weather_context);
-            } else if (data.type === "route") {
-              // Add/update routes in list
-              currentRoutes = [...currentRoutes];
-              currentRoutes[data.index] = data.route;
-              setRouteData({ routes: currentRoutes });
-
-              // Switch screen to route view immediately when Route 1 is ready!
-              if (data.index === 0) {
-                setScreen("route");
-              }
-            } else if (data.type === "error") {
-              throw new Error(data.detail || "Server error curating routes");
-            }
+            data = JSON.parse(trimmed.slice(6));
           } catch (e) {
-            console.error("Stream parse error", e);
+            console.error("Stream parse error parsing JSON:", e);
+            continue;
+          }
+
+          if (data.type === "status") {
+            setLoadingMsg(data.message);
+          } else if (data.type === "weather") {
+            setWeatherContext(data.weather_context);
+          } else if (data.type === "route") {
+            // Add/update routes in list
+            currentRoutes = [...currentRoutes];
+            currentRoutes[data.index] = data.route;
+            setRouteData({ routes: currentRoutes });
+
+            // Switch screen to route view immediately when Route 1 is ready!
+            if (data.index === 0) {
+              setScreen("route");
+            }
+          } else if (data.type === "error") {
+            throw new Error(data.detail || "Server error curating routes");
           }
         }
       }
