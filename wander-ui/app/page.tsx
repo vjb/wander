@@ -22,10 +22,11 @@ import {
 type Screen = "input" | "loading" | "route";
 type VibeId = "Caffeinated & Cultured" | "Green & Scenic" | "Spontaneous & Social";
 
-interface WaypointV2 {
+interface WaypointV3 {
   order: number;
   location_name: string;
   address_hint: string;
+  google_rating?: number | null;
   action_description: string;
   duration_mins: number;
   walk_to_next_mins: number;
@@ -33,16 +34,16 @@ interface WaypointV2 {
   insider_tip: string;
 }
 
-interface WanderRouteOption {
+interface WanderRouteOptionV3 {
   route_name: string;
   theme_summary: string;
   total_walking_time_mins: number;
-  waypoints: WaypointV2[];
+  waypoints: WaypointV3[];
   navigation_deep_link: string;
 }
 
-interface WanderV2Response {
-  routes: WanderRouteOption[];
+interface WanderV3Response {
+  routes: WanderRouteOptionV3[];
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -382,7 +383,7 @@ function LoadingScreen({ message }: { message: string }) {
 
 // ── Waypoint Card ─────────────────────────────────────────────────────────────
 
-function WaypointCard({ waypoint }: { waypoint: WaypointV2 }) {
+function WaypointCard({ waypoint }: { waypoint: WaypointV3 }) {
   const [tipOpen, setTipOpen] = useState(false);
 
   return (
@@ -394,12 +395,22 @@ function WaypointCard({ waypoint }: { waypoint: WaypointV2 }) {
         >
           {waypoint.vibe_tag}
         </span>
-        <h3
-          className="text-[#f4f4f5] text-xl font-semibold leading-tight mb-1"
-          style={{ fontFamily: "var(--font-playfair)" }}
-        >
-          {waypoint.location_name}
-        </h3>
+        <div className="flex items-start justify-between gap-2 mb-1">
+          <h3
+            className="text-[#f4f4f5] text-xl font-semibold leading-tight"
+            style={{ fontFamily: "var(--font-playfair)" }}
+          >
+            {waypoint.location_name}
+          </h3>
+          {waypoint.google_rating != null && (
+            <span
+              className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#e5d3b3]/8 border border-[#e5d3b3]/15 text-[#e5d3b3]/70 text-[11px] font-medium mt-1"
+              style={{ fontFamily: "var(--font-inter)" }}
+            >
+              ★ {waypoint.google_rating.toFixed(1)}
+            </span>
+          )}
+        </div>
         <p
           className="text-[#f4f4f5]/30 text-[12px] font-light mb-4 flex items-center gap-1.5"
           style={{ fontFamily: "var(--font-inter)" }}
@@ -480,7 +491,7 @@ function RouteScreen({
   vibe,
   onReset,
 }: {
-  data: WanderV2Response;
+  data: WanderV3Response;
   vibe: VibeId | "";
   onReset: () => void;
 }) {
@@ -701,7 +712,7 @@ export default function Home() {
   const [end, setEnd] = useState("");
   const [timeBudget, setTimeBudget] = useState(90);
   const [vibe, setVibe] = useState<VibeId | "">("");
-  const [routeData, setRouteData] = useState<WanderV2Response | null>(null);
+  const [routeData, setRouteData] = useState<WanderV3Response | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingMsg, setLoadingMsg] = useState(LOADING_MESSAGES[0]);
 
@@ -737,7 +748,7 @@ export default function Home() {
         throw new Error(err.detail ?? "Route generation failed");
       }
 
-      const data: WanderV2Response = await res.json();
+      const data: WanderV3Response = await res.json();
       setRouteData(data);
       setScreen("route");
     } catch (err: unknown) {
