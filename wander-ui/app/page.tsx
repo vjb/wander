@@ -27,6 +27,7 @@ interface WaypointV3 {
   location_name: string;
   address_hint: string;
   google_rating?: number | null;
+  photo_url?: string | null;
   action_description: string;
   duration_mins: number;
   walk_to_next_mins: number;
@@ -388,77 +389,120 @@ function WaypointCard({ waypoint }: { waypoint: WaypointV3 }) {
 
   return (
     <motion.div variants={cardVariants}>
-      <div className="glass-lighter rounded-2xl p-5 relative overflow-hidden">
-        <span
-          className="inline-block px-2.5 py-0.5 rounded-full bg-[#8ba88e]/10 text-[#8ba88e] text-[10px] font-medium tracking-wider uppercase mb-3"
-          style={{ fontFamily: "var(--font-inter)" }}
-        >
-          {waypoint.vibe_tag}
-        </span>
-        <div className="flex items-start justify-between gap-2 mb-1">
-          <h3
-            className="text-[#f4f4f5] text-xl font-semibold leading-tight"
-            style={{ fontFamily: "var(--font-playfair)" }}
-          >
-            {waypoint.location_name}
-          </h3>
-          {waypoint.google_rating != null && (
+      <div className="glass-lighter rounded-2xl overflow-hidden relative">
+
+        {/* ── Photo Banner ── */}
+        {waypoint.photo_url && (
+          <div className="relative w-full h-40 overflow-hidden">
+            <img
+              src={waypoint.photo_url}
+              alt={waypoint.location_name}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+            {/* gradient fade into card background */}
+            <div
+              className="absolute inset-0"
+              style={{
+                background: "linear-gradient(to bottom, transparent 40%, #1E1E24 100%)",
+              }}
+            />
+            {/* vibe tag floated over the photo */}
             <span
-              className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#e5d3b3]/8 border border-[#e5d3b3]/15 text-[#e5d3b3]/70 text-[11px] font-medium mt-1"
+              className="absolute top-3 left-3 inline-block px-2.5 py-0.5 rounded-full bg-[#131316]/70 backdrop-blur-sm text-[#8ba88e] text-[10px] font-medium tracking-wider uppercase"
               style={{ fontFamily: "var(--font-inter)" }}
             >
-              ★ {waypoint.google_rating.toFixed(1)}
+              {waypoint.vibe_tag}
+            </span>
+            {/* rating floated over the photo */}
+            {waypoint.google_rating != null && (
+              <span
+                className="absolute top-3 right-3 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#131316]/70 backdrop-blur-sm text-[#e5d3b3] text-[11px] font-medium"
+                style={{ fontFamily: "var(--font-inter)" }}
+              >
+                ★ {waypoint.google_rating.toFixed(1)}
+              </span>
+            )}
+          </div>
+        )}
+
+        <div className="p-5">
+          {/* vibe tag — only shown when no photo (photo shows it above) */}
+          {!waypoint.photo_url && (
+            <span
+              className="inline-block px-2.5 py-0.5 rounded-full bg-[#8ba88e]/10 text-[#8ba88e] text-[10px] font-medium tracking-wider uppercase mb-3"
+              style={{ fontFamily: "var(--font-inter)" }}
+            >
+              {waypoint.vibe_tag}
             </span>
           )}
-        </div>
-        <p
-          className="text-[#f4f4f5]/30 text-[12px] font-light mb-4 flex items-center gap-1.5"
-          style={{ fontFamily: "var(--font-inter)" }}
-        >
-          <MapPin className="w-3 h-3 shrink-0" strokeWidth={1.5} />
-          {waypoint.address_hint}
-        </p>
-        <p
-          className="text-[#f4f4f5]/65 text-[14px] font-light leading-relaxed mb-4"
-          style={{ fontFamily: "var(--font-inter)" }}
-        >
-          {waypoint.action_description}
-        </p>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-[#e5d3b3]/60 text-[12px] font-light" style={{ fontFamily: "var(--font-inter)" }}>
-            <Timer className="w-3.5 h-3.5" strokeWidth={1.5} />
-            {waypoint.duration_mins} min
+
+          <div className="flex items-start justify-between gap-2 mb-1">
+            <h3
+              className="text-[#f4f4f5] text-xl font-semibold leading-tight"
+              style={{ fontFamily: "var(--font-playfair)" }}
+            >
+              {waypoint.location_name}
+            </h3>
+            {/* rating badge — only shown when no photo (photo shows it above) */}
+            {!waypoint.photo_url && waypoint.google_rating != null && (
+              <span
+                className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#e5d3b3]/8 border border-[#e5d3b3]/15 text-[#e5d3b3]/70 text-[11px] font-medium mt-1"
+                style={{ fontFamily: "var(--font-inter)" }}
+              >
+                ★ {waypoint.google_rating.toFixed(1)}
+              </span>
+            )}
           </div>
-          <button
-            id={`tip-toggle-${waypoint.order}`}
-            onClick={() => setTipOpen((o) => !o)}
-            className="flex items-center gap-1.5 text-[#e5d3b3]/50 hover:text-[#e5d3b3]/80 text-[12px] font-medium transition-colors"
+          <p
+            className="text-[#f4f4f5]/30 text-[12px] font-light mb-4 flex items-center gap-1.5"
             style={{ fontFamily: "var(--font-inter)" }}
           >
-            <Lightbulb className="w-3.5 h-3.5" strokeWidth={1.5} />
-            {tipOpen ? "Hide tip" : "Insider tip"}
-          </button>
-        </div>
-        <AnimatePresence>
-          {tipOpen && (
-            <motion.div
-              initial={{ opacity: 0, height: 0, marginTop: 0 }}
-              animate={{ opacity: 1, height: "auto", marginTop: 12 }}
-              exit={{ opacity: 0, height: 0, marginTop: 0 }}
-              transition={{ duration: 0.3, ease: "easeInOut" }}
-              className="overflow-hidden"
+            <MapPin className="w-3 h-3 shrink-0" strokeWidth={1.5} />
+            {waypoint.address_hint}
+          </p>
+          <p
+            className="text-[#f4f4f5]/65 text-[14px] font-light leading-relaxed mb-4"
+            style={{ fontFamily: "var(--font-inter)" }}
+          >
+            {waypoint.action_description}
+          </p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-[#e5d3b3]/60 text-[12px] font-light" style={{ fontFamily: "var(--font-inter)" }}>
+              <Timer className="w-3.5 h-3.5" strokeWidth={1.5} />
+              {waypoint.duration_mins} min
+            </div>
+            <button
+              id={`tip-toggle-${waypoint.order}`}
+              onClick={() => setTipOpen((o) => !o)}
+              className="flex items-center gap-1.5 text-[#e5d3b3]/50 hover:text-[#e5d3b3]/80 text-[12px] font-medium transition-colors"
+              style={{ fontFamily: "var(--font-inter)" }}
             >
-              <div className="pt-3 border-t border-[#e5d3b3]/8">
-                <p
-                  className="text-[#e5d3b3]/60 text-[13px] font-light leading-relaxed italic"
-                  style={{ fontFamily: "var(--font-playfair)" }}
-                >
-                  &ldquo;{waypoint.insider_tip}&rdquo;
-                </p>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+              <Lightbulb className="w-3.5 h-3.5" strokeWidth={1.5} />
+              {tipOpen ? "Hide tip" : "Insider tip"}
+            </button>
+          </div>
+          <AnimatePresence>
+            {tipOpen && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                animate={{ opacity: 1, height: "auto", marginTop: 12 }}
+                exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                transition={{ duration: 0.3, ease: "easeInOut" }}
+                className="overflow-hidden"
+              >
+                <div className="pt-3 border-t border-[#e5d3b3]/8">
+                  <p
+                    className="text-[#e5d3b3]/60 text-[13px] font-light leading-relaxed italic"
+                    style={{ fontFamily: "var(--font-playfair)" }}
+                  >
+                    &ldquo;{waypoint.insider_tip}&rdquo;
+                  </p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
     </motion.div>
   );

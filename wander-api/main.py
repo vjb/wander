@@ -86,6 +86,7 @@ class WaypointV3(BaseModel):
     location_name: str
     address_hint: str
     google_rating: Optional[float] = None
+    photo_url: Optional[str] = None
     action_description: str
     duration_mins: int
     walk_to_next_mins: int = 0
@@ -196,12 +197,22 @@ async def _places_search_text(query: str, lat: float, lng: float) -> List[Dict]:
                     "X-Goog-Api-Key": GOOGLE_KEY,
                     "X-Goog-FieldMask": (
                         "places.id,places.displayName,places.formattedAddress,"
-                        "places.rating,places.types,places.location"
+                        "places.rating,places.types,places.location,places.photos"
                     ),
                 },
             )
             places = []
             for p in res.json().get("places", []):
+                # Build photo URL from first photo reference if available
+                photo_url = None
+                photos = p.get("photos", [])
+                if photos:
+                    photo_name = photos[0].get("name", "")
+                    if photo_name:
+                        photo_url = (
+                            f"https://places.googleapis.com/v1/{photo_name}/media"
+                            f"?maxWidthPx=800&maxHeightPx=500&key={GOOGLE_KEY}"
+                        )
                 places.append(
                     {
                         "place_id": p.get("id", ""),
@@ -211,6 +222,7 @@ async def _places_search_text(query: str, lat: float, lng: float) -> List[Dict]:
                         "types": p.get("types", [])[:3],
                         "lat": p.get("location", {}).get("latitude"),
                         "lng": p.get("location", {}).get("longitude"),
+                        "photo_url": photo_url,
                     }
                 )
             return places
@@ -428,9 +440,10 @@ async def generate_route(request: RouteRequest):
                         idx = wp.venue_index - 1
                         venue = venues[idx] if (0 <= idx < len(venues)) else None
 
-                        name    = venue["name"]    if venue else f"Stop {wp.order}"
-                        address = venue["address"] if venue else request.start_location
-                        rating  = venue.get("rating") if venue else None
+                        name     = venue["name"]      if venue else f"Stop {wp.order}"
+                        address  = venue["address"]   if venue else request.start_location
+                        rating   = venue.get("rating")    if venue else None
+                        photo_url = venue.get("photo_url") if venue else None
 
                         addresses.append(address)
                         waypoints.append(
@@ -439,6 +452,7 @@ async def generate_route(request: RouteRequest):
                                 location_name=name,
                                 address_hint=address,
                                 google_rating=rating,
+                                photo_url=photo_url,
                                 action_description=wp.action_description,
                                 duration_mins=wp.duration_mins,
                                 walk_to_next_mins=0,  # filled below
