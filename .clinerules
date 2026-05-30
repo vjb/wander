@@ -1,0 +1,19 @@
+# Project Rules: Memory & Browser Process Management
+
+To prevent system memory overload, hangs, and crashes during automated browser/screenshot operations, all AI agents and subagents must strictly adhere to the following rules:
+
+## 1. No Concurrent Browser Tasks or Subagents
+- **Do NOT spawn background subagents** to run Playwright, Puppeteer, or any browser automation scripts. Because subagents run in the background, their terminal command permission prompts time out, causing them to stall and leave zombie processes active.
+- **Run all browser operations directly in the foreground** through the main agent conversation. This ensures permission prompts are immediately visible for user approval.
+- **Never run multiple browser tasks concurrently.** Execute them sequentially, allowing one task to finish completely and close its resources before starting the next.
+
+## 2. Guaranteed Process Cleanup
+- **Wrap all browser automation** (in JavaScript, Python, or Playwright) in strict `try/finally` or async context manager blocks (`async with async_playwright() as p:`) to guarantee the browser is closed (`await browser.close()`) even if the script errors or is cancelled.
+- **Kill zombie processes**: After running any script that starts a browser, run a command to check for and terminate any lingering processes. On Windows:
+  ```powershell
+  taskkill /F /IM chrome.exe /FI "STATUS eq RUNNING"
+  taskkill /F /IM chromedriver.exe
+  ```
+
+## 3. Limit Screenshot Resolutions
+- Keep browser viewports and screenshot sizes minimal (e.g., max 1440x900) to minimize memory usage during rendering and saving.

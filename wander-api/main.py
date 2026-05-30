@@ -144,12 +144,19 @@ class RouteOptionLLM(BaseModel):
     )
     waypoints: List[SelectedWaypointLLM] = Field(
         ...,
+        min_length=3,
+        max_length=4,
         description="3–4 stops selected from the verified venue list, in geographic order",
     )
 
 
 class V3ResponseLLM(BaseModel):
-    routes: List[RouteOptionLLM] = Field(..., description="Exactly 3 distinct routes")
+    routes: List[RouteOptionLLM] = Field(
+        ...,
+        min_length=3,
+        max_length=3,
+        description="Exactly 3 distinct routes",
+    )
 
 
 # (Fallback uses the same V3ResponseLLM so "exactly 3 routes" is always enforced)
