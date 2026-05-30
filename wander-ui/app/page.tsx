@@ -1506,7 +1506,11 @@ export function RouteScreen({
           >
             {(() => {
               const walkingMins = activeRoute.initial_walk_mins + activeRoute.waypoints.reduce((sum, wp) => sum + (wp.walk_to_next_mins || 0), 0);
-              const dwellMins = activeRoute.total_walking_time_mins - walkingMins;
+              const dwellMins = activeRoute.waypoints.reduce((sum, wp) => sum + (wp.duration_mins || 0), 0);
+              const totalMins = walkingMins + dwellMins;
+              const hrs = Math.floor(totalMins / 60);
+              const mins = totalMins % 60;
+              const totalLabel = hrs > 0 ? (mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`) : `${mins}m`;
               return (
                 <>
                   <span
@@ -1520,6 +1524,12 @@ export function RouteScreen({
                     style={{ fontFamily: "var(--font-inter)" }}
                   >
                     ☕ {dwellMins} min at stops
+                  </span>
+                  <span
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f4f4f5]/8 text-[#f4f4f5]/70 text-[11px] font-medium border border-[#f4f4f5]/15"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                  >
+                    ⏱️ {totalLabel} total
                   </span>
                 </>
               );
