@@ -101,6 +101,11 @@ class WanderRouteOptionV3(BaseModel):
     route_name: str
     theme_summary: str
     total_walking_time_mins: int
+    initial_walk_mins: int = 0
+    start_lat: Optional[float] = None
+    start_lng: Optional[float] = None
+    end_lat: Optional[float] = None
+    end_lng: Optional[float] = None
     waypoints: List[WaypointV3]
     navigation_deep_link: str
 
@@ -524,17 +529,25 @@ async def generate_route(request: RouteRequest):
                         )
 
                     # Real walking times from Directions API
-                    walk_times = await get_walking_times(addresses)
-                    for wp_obj, wt in zip(waypoints, walk_times):
-                        wp_obj.walk_to_next_mins = wt
+                    full_addresses = [request.start_location] + addresses + [request.end_location]
+                    walk_times = await get_walking_times(full_addresses)
+                    
+                    initial_walk_mins = walk_times[0] if walk_times else 0
+                    for i, wp_obj in enumerate(waypoints):
+                        wp_obj.walk_to_next_mins = walk_times[i + 1] if i + 1 < len(walk_times) else 0
 
-                    total_time = sum(w.duration_mins + w.walk_to_next_mins for w in waypoints)
+                    total_time = sum(w.duration_mins + w.walk_to_next_mins for w in waypoints) + initial_walk_mins
 
                     enriched_routes.append(
                         WanderRouteOptionV3(
                             route_name=raw_route.route_name,
                             theme_summary=raw_route.theme_summary,
                             total_walking_time_mins=total_time,
+                            initial_walk_mins=initial_walk_mins,
+                            start_lat=start_ll["lat"] if start_ll else None,
+                            start_lng=start_ll["lng"] if start_ll else None,
+                            end_lat=end_ll["lat"] if end_ll else None,
+                            end_lng=end_ll["lng"] if end_ll else None,
                             waypoints=waypoints,
                             navigation_deep_link=build_maps_deep_link(
                                 request.start_location,
@@ -578,6 +591,11 @@ async def generate_route(request: RouteRequest):
                         total_walking_time_mins=sum(
                             w.duration_mins for w in waypoints_fb
                         ),
+                        initial_walk_mins=0,
+                        start_lat=None,
+                        start_lng=None,
+                        end_lat=None,
+                        end_lng=None,
                         waypoints=waypoints_fb,
                         navigation_deep_link=build_maps_deep_link(
                             request.start_location,

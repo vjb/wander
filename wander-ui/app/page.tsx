@@ -42,6 +42,11 @@ interface WanderRouteOptionV3 {
   route_name: string;
   theme_summary: string;
   total_walking_time_mins: number;
+  initial_walk_mins: number;
+  start_lat?: number | null;
+  start_lng?: number | null;
+  end_lat?: number | null;
+  end_lng?: number | null;
   waypoints: WaypointV3[];
   navigation_deep_link: string;
 }
@@ -707,6 +712,17 @@ function RouteScreen({
             exit={{ opacity: 0, transition: { duration: 0.2 } }}
             className="mb-10"
           >
+            {/* Initial Walk from Start Location */}
+            {activeRoute.initial_walk_mins > 0 && (
+              <div className="ml-10 mb-2">
+                <WalkLabel
+                  mins={activeRoute.initial_walk_mins}
+                  origin={(activeRoute.start_lat != null && activeRoute.start_lng != null) ? { lat: activeRoute.start_lat as number, lng: activeRoute.start_lng as number } : undefined}
+                  destination={(activeRoute.waypoints[0]?.lat != null && activeRoute.waypoints[0]?.lng != null) ? { lat: activeRoute.waypoints[0].lat as number, lng: activeRoute.waypoints[0].lng as number } : undefined}
+                />
+              </div>
+            )}
+
             {activeRoute.waypoints.map((wp, i) => (
               <div key={`${selectedIndex}-${wp.order}`}>
                 {/* Stop number indicator */}
@@ -723,12 +739,16 @@ function RouteScreen({
                 </div>
 
                 {/* Walk label to next stop */}
-                {i < activeRoute.waypoints.length - 1 && wp.walk_to_next_mins > 0 && (
+                {wp.walk_to_next_mins > 0 && (
                   <div className="ml-10">
                     <WalkLabel 
                       mins={wp.walk_to_next_mins}
                       origin={(wp.lat != null && wp.lng != null) ? { lat: wp.lat as number, lng: wp.lng as number } : undefined}
-                      destination={(activeRoute.waypoints[i+1].lat != null && activeRoute.waypoints[i+1].lng != null) ? { lat: activeRoute.waypoints[i+1].lat as number, lng: activeRoute.waypoints[i+1].lng as number } : undefined}
+                      destination={
+                        i < activeRoute.waypoints.length - 1
+                          ? ((activeRoute.waypoints[i+1].lat != null && activeRoute.waypoints[i+1].lng != null) ? { lat: activeRoute.waypoints[i+1].lat as number, lng: activeRoute.waypoints[i+1].lng as number } : undefined)
+                          : ((activeRoute.end_lat != null && activeRoute.end_lng != null) ? { lat: activeRoute.end_lat as number, lng: activeRoute.end_lng as number } : undefined)
+                      }
                     />
                   </div>
                 )}

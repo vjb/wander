@@ -1,5 +1,7 @@
 # Wander
 
+![Wander Banner](assets/banner.png)
+
 > *Your life isn't a chore; wander.*
 
 An AI-powered urban itinerary generator that turns any two addresses into three distinct, navigation-ready walking routes — in under 20 seconds. Built for people who want to actually experience their city, not just survive it.
@@ -7,6 +9,8 @@ An AI-powered urban itinerary generator that turns any two addresses into three 
 ---
 
 ## What It Does
+
+![Wander App Walkthrough](assets/app-walkthrough.png)
 
 You give Wander a starting point, a destination, a time budget, and a vibe. It fires a radar sweep across Google Places, pulls real, verified venues near your corridor, and hands that context to GPT-4o. The model curates — never invents — three uniquely themed routes from the real-world data. Every walking time is validated by Google Directions. Every stop has a live Google rating. One tap hands the whole thing off to Google Maps for turn-by-turn GPS navigation.
 
@@ -64,6 +68,13 @@ User Request (start, end, time, vibe)
     │
     └─ WanderV3Response → 3 routes, google_rating on every stop, ready to navigate
 ```
+
+## Prerequisites
+
+You must have the following installed locally:
+- Python 3.13+
+- Node.js 18+ (for Next.js 16 compatibility)
+- A package manager (npm, pnpm, yarn)
 
 ---
 
@@ -216,13 +227,9 @@ Typography: **Playfair Display** (serif, headings) + **Inter** (sans, body).
 
 Tap **Start Wandering** and the native Google Maps app opens with the full multi-stop walking tour pre-loaded. No copy-pasting addresses. No manual entry. One tap.
 
-![Google Maps walking route — blue dotted line, Hell's Kitchen to Flatiron, 1 hr 9 min / 3.0 miles](assets/08-google-maps.png)
+![Map Handoff Visualization](assets/map-handoff.png)
 
-**What's in the screenshot:**
-- Blue dotted walking route traced across the NYC map from Hell's Kitchen → Flatiron District
-- All Wander-generated waypoints pinned (750 11th Ave, 540 W 26th St)
-- Google's own route summary: *via W 49th St and 11th Ave — 1 hr 9 min / 3.0 miles*
-- Walking mode pre-selected — tap **Start** for turn-by-turn GPS
+*The deep link transitions the curated itinerary directly from the Wander UI to the native Google Maps navigation.*
 
 The deep link is built server-side in `build_maps_deep_link()` with URL-encoded, pipe-separated waypoints. Works identically in the native Google Maps iOS/Android app.
 
@@ -236,3 +243,10 @@ The deep link is built server-side in `build_maps_deep_link()` with URL-encoded,
 | **V3** | RAG pipeline — Google Places radar, hallucination-free stops, real Directions walk times, `google_rating` trust badges |
 | **V2** | 3-route generation, Framer Motion carousel, walk-time labels, sticky Google Maps deep-link button |
 | **V1** | Single-route generation, GPT-4o structured output, LangSmith tracing, Tavily enrichment |
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
