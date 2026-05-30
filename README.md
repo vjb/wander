@@ -233,7 +233,7 @@ Typography: **Playfair Display** (serif, headings) + **Inter** (sans, body).
 
 Tap **Start Wandering** and the native Google Maps app opens with the full multi-stop walking tour pre-loaded. No copy-pasting addresses. No manual entry. One tap.
 
-![Map Handoff Visualization](assets/map-handoff.png)
+![Map Handoff Visualization](assets/08-google-maps.png)
 
 *The deep link transitions the curated itinerary directly from the Wander UI to the native Google Maps navigation.*
 
