@@ -1,0 +1,5 @@
+docs: add visual assets and update README prerequisites/license
+
+- Generated and saved project banner, app walkthrough mockup, and map handoff visualization.
+- Inserted Prerequisites and License sections in README.md.
+- Updated README.md with the new visual assets.

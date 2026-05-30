@@ -15,6 +15,8 @@ import {
   Timer,
   ExternalLink,
   Footprints,
+  LocateFixed,
+  Loader2,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -152,6 +154,7 @@ function InputScreen({
   timeBudget, setTimeBudget,
   vibe, setVibe,
   onWander, error,
+  handleLocate, isLocating,
 }: {
   start: string; setStart: (v: string) => void;
   end: string; setEnd: (v: string) => void;
@@ -159,6 +162,8 @@ function InputScreen({
   vibe: VibeId | ""; setVibe: (v: VibeId) => void;
   onWander: () => void;
   error: string | null;
+  handleLocate: () => void;
+  isLocating: boolean;
 }) {
   const canWander = start.trim().length > 0 && end.trim().length > 0 && vibe !== "";
 
@@ -219,9 +224,17 @@ function InputScreen({
                 placeholder="Starting from…"
                 value={start}
                 onChange={(e) => setStart(e.target.value)}
-                className="flex-1 bg-transparent text-[#f4f4f5] placeholder-[#f4f4f5]/20 text-[15px] font-light tracking-wide focus:outline-none"
+                className="flex-1 bg-transparent text-[#f4f4f5] placeholder-[#f4f4f5]/20 text-[15px] font-light tracking-wide focus:outline-none min-w-0"
                 style={{ fontFamily: "var(--font-inter)" }}
               />
+              <button 
+                onClick={handleLocate}
+                className="p-1.5 shrink-0 rounded-md bg-[#8ba88e]/5 hover:bg-[#8ba88e]/15 text-[#8ba88e] transition-colors"
+                title="Use my current location"
+                disabled={isLocating}
+              >
+                {isLocating ? <Loader2 className="w-4 h-4 animate-spin" /> : <LocateFixed className="w-4 h-4" strokeWidth={1.5} />}
+              </button>
             </div>
             <div className="flex items-center pl-[7px] py-1 gap-3.5">
               <div className="w-2 h-2 rounded-full border border-[#f4f4f5]/15 shrink-0" />
@@ -767,6 +780,16 @@ function RouteScreen({
           </motion.div>
         </AnimatePresence>
 
+        {/* ── Map Preview ── */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.3, duration: 0.5 }}
+          className="mb-10 w-full h-[320px] rounded-2xl overflow-hidden border border-[#f4f4f5]/10 shadow-lg relative bg-[#131316]"
+        >
+          <MapPreview route={activeRoute} />
+        </motion.div>
+
         {/* Reset */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -827,6 +850,7 @@ export default function Home() {
   const [end, setEnd] = useState("");
   const [timeBudget, setTimeBudget] = useState(90);
   const [vibe, setVibe] = useState<VibeId | "">("");
+  const [isLocating, setIsLocating] = useState(false);
   const [routeData, setRouteData] = useState<WanderV3Response | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingMsg, setLoadingMsg] = useState(LOADING_MESSAGES[0]);
@@ -878,6 +902,32 @@ export default function Home() {
     setScreen("input");
   }, []);
 
+  const handleLocate = useCallback(() => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser");
+      return;
+    }
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const res = await fetch(`http://127.0.0.1:8000/api/reverse-geocode?lat=${position.coords.latitude}&lng=${position.coords.longitude}`);
+          const data = await res.json();
+          if (data.address) {
+            setStart(data.address);
+          }
+        } catch (e) {
+          console.error("Geocoding failed", e);
+        }
+        setIsLocating(false);
+      },
+      (error) => {
+        console.error(error);
+        setIsLocating(false);
+      }
+    );
+  }, []);
+
   return (
     <main className="min-h-screen bg-[#131316] text-[#f4f4f5] relative overflow-x-hidden">
       <BackgroundOrbs />
@@ -891,6 +941,8 @@ export default function Home() {
             vibe={vibe} setVibe={setVibe}
             onWander={handleWander}
             error={error}
+            handleLocate={handleLocate}
+            isLocating={isLocating}
           />
         )}
         {screen === "loading" && (

@@ -609,3 +609,20 @@ async def generate_route(request: RouteRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/reverse-geocode")
+async def reverse_geocode(lat: float, lng: float):
+    """Securely reverse geocode coordinates to a human-readable address."""
+    if not GOOGLE_KEY:
+        raise HTTPException(status_code=500, detail="Google Maps API Key not configured")
+    
+    async with httpx.AsyncClient() as client:
+        url = f"https://maps.googleapis.com/maps/api/geocode/json?latlng={lat},{lng}&key={GOOGLE_KEY}"
+        resp = await client.get(url)
+        data = resp.json()
+        if data.get("status") == "OK" and data.get("results"):
+            # Use the first formatted address (usually the most specific)
+            return {"address": data["results"][0]["formatted_address"]}
+        
+        # If ZERO_RESULTS or other errors, fallback to coordinates
+        return {"address": f"{lat:.4f}, {lng:.4f}"}
