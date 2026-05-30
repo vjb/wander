@@ -151,9 +151,22 @@ The deep link format:
 https://www.google.com/maps/dir/?api=1
   &origin=Hell%27s+Kitchen%2C+NYC
   &destination=Flatiron+District%2C+NYC
-  &waypoints=Pier+84%2C+W+44th+St...%7CThe+High+Line...%7CMadison+Square+Park...
+  &waypoints=750+11th+Ave...%7C540+W+26th+St...
   &travelmode=walking
 ```
+
+### Screen 8 — Google Maps Navigation
+
+Google Maps opens with the full walking route rendered — blue dotted line, all stops pinned, total time and distance calculated.
+
+![Google Maps walking route — blue dotted line, 4 stops, 1 hr 9 min / 3.0 miles](../assets/08-google-maps.png)
+
+**What you see:**
+- Blue dotted walking route tracing from Hell's Kitchen → Flatiron
+- All waypoints pinned on the map (750 11th Ave, 540 W 26th St)
+- **Route summary:** *via W 49th St and 11th Ave — 1 hr 9 min / 3.0 miles*
+- Walking mode icon selected in the transport bar
+- Tap the blue **Start** button for turn-by-turn GPS navigation
 
 All addresses are URL-encoded server-side in `build_maps_deep_link()`. The native Google Maps app opens on mobile.
 
@@ -218,3 +231,4 @@ wander-ui/
 | `assets/05-carousel.png` | Tab switched | Framer Motion `layoutId` pill slide |
 | `assets/06-insider-tip.png` | Tip expanded | AnimatePresence height animation |
 | `assets/07-sticky-button.png` | Start Wandering | Frosted gradient, deep link handoff |
+| `assets/08-google-maps.png` | Google Maps open | Blue walking route, all stops pinned, 1hr 9min / 3mi |

@@ -212,7 +212,24 @@ Typography: **Playfair Display** (serif, headings) + **Inter** (sans, body).
 
 ---
 
+## The Handoff — Google Maps Navigation
+
+Tap **Start Wandering** and the native Google Maps app opens with the full multi-stop walking tour pre-loaded. No copy-pasting addresses. No manual entry. One tap.
+
+![Google Maps walking route — blue dotted line, Hell's Kitchen to Flatiron, 1 hr 9 min / 3.0 miles](assets/08-google-maps.png)
+
+**What's in the screenshot:**
+- Blue dotted walking route traced across the NYC map from Hell's Kitchen → Flatiron District
+- All Wander-generated waypoints pinned (750 11th Ave, 540 W 26th St)
+- Google's own route summary: *via W 49th St and 11th Ave — 1 hr 9 min / 3.0 miles*
+- Walking mode pre-selected — tap **Start** for turn-by-turn GPS
+
+The deep link is built server-side in `build_maps_deep_link()` with URL-encoded, pipe-separated waypoints. Works identically in the native Google Maps iOS/Android app.
+
+---
+
 ## Changelog
+
 
 | Version | Highlights |
 |---|---|
