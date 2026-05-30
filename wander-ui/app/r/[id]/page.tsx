@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Loader2, ArrowLeft } from "lucide-react";
 import { RouteScreen } from "../../page";
+import { usePassport } from "../../hooks/usePassport";
 
 interface WaypointV3 {
   order: number;
@@ -49,6 +50,9 @@ export default function SharedRoutePage() {
   const [routeData, setRouteData] = useState<WanderV3Response | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // ── Fix #20: shared route now stamps the passport on check-in ──
+  const { addStamp } = usePassport();
 
   useEffect(() => {
     if (!id) return;
@@ -115,6 +119,7 @@ export default function SharedRoutePage() {
         vibe={""}
         onReset={() => router.push("/")}
         isSharedView={true}
+        addPassportStamp={addStamp}
       />
     </main>
   );

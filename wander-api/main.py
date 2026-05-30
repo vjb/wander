@@ -92,6 +92,37 @@ VIBE_QUERIES: Dict[str, List[str]] = {
     ],
 }
 
+# ── Vibe → Route Archetypes (Fix #9) ─────────────────────────────────────────
+VIBE_ROUTE_ARCHETYPES: Dict[str, List[tuple]] = {
+    "Caffeinated & Cultured": [
+        ("the morning ritual", "an espresso-forward crawl through specialty roasters and artisan bakeries"),
+        ("the gallery drift", "a route anchored by contemporary art spaces, vinyl shops, and design bookstores"),
+        ("the literary afternoon", "a slow wander through independent bookstores, quiet reading cafes, and jazz bars"),
+    ],
+    "Green & Scenic": [
+        ("the park connector", "a nature-first route linking green spaces, community gardens, and waterfront paths"),
+        ("the scenic overlook loop", "a route built around elevated views, architectural landmarks, and open sky"),
+        ("the botanist's wander", "a slow exploration of hidden gardens, tree-lined blocks, and quiet outdoor sanctuaries"),
+    ],
+    "Spontaneous & Social": [
+        ("the rooftop circuit", "a lively route hopping between rooftop bars, food halls, and street-level energy"),
+        ("the local's night out", "a social loop through neighborhood bars, live music spots, and late-night bites"),
+        ("the market crawl", "a street-food-forward route through outdoor markets, pop-up stalls, and craft beer stops"),
+    ],
+    "Mental Break": [
+        ("the decompression loop", "a quiet, short route through pocket parks, a slow coffee, and fresh air"),
+        ("the mindful stroll", "a gentle wander through serene green spaces and a calm neighborhood cafe"),
+        ("the reset walk", "a focused micro-route: one good coffee, one quiet park bench, one breath of city air"),
+    ],
+}
+
+# For custom vibes, fall back to generic but still varied archetypes
+DEFAULT_ARCHETYPES: List[tuple] = [
+    ("the discovery route", "a curious, open-ended wander shaped by the user's specific vibe"),
+    ("the local's pick", "a route that leans into what locals actually do in this neighborhood"),
+    ("the mood route", "a carefully sequenced path that matches the energy of the user's vibe from start to finish"),
+]
+
 # ── Pydantic Models ───────────────────────────────────────────────────────────
 
 class WaypointV3(BaseModel):
@@ -139,6 +170,46 @@ class RouteRequest(BaseModel):
     local_time: Optional[str] = None
     num_stops: Optional[int] = 3
     free_only: Optional[bool] = False
+    companion: Optional[str] = "solo"
+
+
+class AdvisorRequest(BaseModel):
+    start_location: str
+    end_location: str
+    time_budget_minutes: int
+    num_stops: int
+    companion: str
+    local_time: Optional[str] = None
+
+
+class AdvisorResponse(BaseModel):
+    detected_neighborhood: str
+    density_level: str
+    recommended_stops: int
+    pacing_message: str
+    feasibility_status: str
+    density_badge_message: str
+    weather_advice: Optional[str] = None
+
+
+class PresetOption(BaseModel):
+    title: str
+    vibe: str
+    time_budget: int
+    num_stops: int
+    free_only: bool
+    companion: str
+    reason: str
+
+
+class PresetRequest(BaseModel):
+    start_location: str
+    local_time: Optional[str] = None
+    refresh: bool = False
+
+
+class PresetsResponse(BaseModel):
+    presets: List[PresetOption]
 
 
 class ShareRequest(BaseModel):
@@ -162,7 +233,14 @@ class SelectedWaypointLLM(BaseModel):
             "Specific, warm, never generic. Reference what makes this place worth stopping for."
         ),
     )
-    duration_mins: int = Field(..., description="Minutes to spend here (excluding walking)")
+    duration_mins: int = Field(
+        ...,
+        description=(
+            "Realistic minutes to spend at this specific venue (excluding walking time). "
+            "Use the VENUE TYPE DURATION TABLE in the system prompt — do NOT split the budget evenly. "
+            "A coffee stop is 15-25 min; a gallery is 30-60 min; a park is 20-40 min. Vary across stops."
+        )
+    )
     vibe_tag: str = Field(..., description="1–3 word micro-label e.g. 'Hidden Gem', 'Coffee Fix'")
     insider_tip: str = Field(
         ...,
@@ -425,53 +503,71 @@ async def fetch_candidate_venues(start_ll: Dict, end_ll: Optional[Dict], vibe: s
 
 async def get_walking_times(addresses: List[str]) -> List[int]:
     """
-    Call Directions API between each consecutive pair of addresses.
+    Call Directions API between each consecutive pair of addresses in parallel.
     Returns a list of walk_mins per stop (last stop is always 0).
     Falls back to 8 min per leg on any error.
     """
     if len(addresses) < 2:
         return [0] * len(addresses)
 
-    walk_times: List[int] = []
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        for i in range(len(addresses) - 1):
-            try:
-                res = await client.get(
-                    "https://maps.googleapis.com/maps/api/directions/json",
-                    params={
-                        "origin": addresses[i],
-                        "destination": addresses[i + 1],
-                        "mode": "walking",
-                        "key": GOOGLE_KEY,
-                    },
-                )
-                data = res.json()
-                if data.get("status") == "OK":
-                    secs = data["routes"][0]["legs"][0]["duration"]["value"]
-                    walk_times.append(round(secs / 60))
-                else:
-                    walk_times.append(8)
-            except Exception:
-                walk_times.append(8)
+    async def _fetch_leg(client: httpx.AsyncClient, origin: str, destination: str) -> int:
+        try:
+            res = await client.get(
+                "https://maps.googleapis.com/maps/api/directions/json",
+                params={
+                    "origin": origin,
+                    "destination": destination,
+                    "mode": "walking",
+                    "key": GOOGLE_KEY,
+                },
+            )
+            data = res.json()
+            if data.get("status") == "OK":
+                secs = data["routes"][0]["legs"][0]["duration"]["value"]
+                return round(secs / 60)
+            return 8
+        except Exception:
+            return 8
 
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        tasks = [
+            _fetch_leg(client, addresses[i], addresses[i + 1])
+            for i in range(len(addresses) - 1)
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    walk_times: List[int] = [
+        r if isinstance(r, int) else 8
+        for r in results
+    ]
     walk_times.append(0)  # last stop never walks to a next stop
     return walk_times
 
 
 # ── Deep-link builder ─────────────────────────────────────────────────────────
 
-def build_maps_deep_link(start: str, end: str, waypoint_addresses: List[str]) -> str:
+def build_maps_deep_link(
+    start: str,
+    end: str,
+    waypoints: List[str],
+    waypoint_place_ids: Optional[List[str]] = None
+) -> str:
     """Build a URL-encoded Google Maps walking directions deep link."""
     origin      = quote_plus(start.strip())
     destination = quote_plus(end.strip())
-    wp_str      = "|".join(quote_plus(a.strip()) for a in waypoint_addresses if a.strip())
-    return (
+    wp_str      = "|".join(quote_plus(w.strip()) for w in waypoints if w.strip())
+    url = (
         f"https://www.google.com/maps/dir/?api=1"
         f"&origin={origin}"
         f"&destination={destination}"
         f"&waypoints={wp_str}"
         f"&travelmode=walking"
     )
+    if waypoint_place_ids:
+        pids_str = "|".join(quote_plus(pid.strip()) for pid in waypoint_place_ids if pid and pid.strip())
+        if pids_str:
+            url += f"&waypoint_place_ids={pids_str}"
+    return url
 
 
 # ── Single Route OpenAI generation (RAG mode) ──────────────────────────────────
@@ -494,11 +590,11 @@ def _call_openai_single_route_sync(
     ]
     venues_context = "\n".join(venue_lines)
 
-    # Per-stop duration: budget minus realistic walking time (12 min per leg × n_stops legs)
+    # Keep a soft per-stop floor for feasibility checking only — the LLM does the real allocation
     _stops = request.num_stops if request.num_stops else 3
     _walk_per_leg_mins = 12  # realistic city block walking between nearby stops
     _walk_allowance = _walk_per_leg_mins * _stops
-    _per_stop_mins = max(15, (request.time_budget_minutes - _walk_allowance) // _stops)
+    _per_stop_mins = max(15, (request.time_budget_minutes - _walk_allowance) // _stops)  # used as budget floor reference only
 
     weather_prompt_chunk = ""
     if weather_info:
@@ -526,6 +622,35 @@ def _call_openai_single_route_sync(
         "DAYPART TRANSITIONING RULE: If the time budget spans across major dayparts (e.g., starting at 4:00 PM for 3 hours), logically sequence the stops to transition with the day (e.g., afternoon activity -> sunset view -> dinner/evening drinks). Do not suggest coffee shops at 7 PM.\n"
     )
 
+    companion_prompt_chunk = ""
+    comp = (request.companion or "solo").lower()
+    if comp == "solo":
+        companion_prompt_chunk = (
+            "COMPANION PROFILE: You are walking SOLO. "
+            "Prioritize quiet, contemplative spaces suitable for a single walker, such as "
+            "independent bookstores, single garden benches, quiet art galleries, or quick coffee windows.\n"
+        )
+    elif comp == "date":
+        companion_prompt_chunk = (
+            "COMPANION PROFILE: You are on a DATE. "
+            "Prioritize intimate, romantic, and high-vibe spaces with cozy atmospheres "
+            "(e.g., dimly lit cocktail bars, scenic overlooks, beautiful architecture, shared desserts). "
+            "Explain how the atmosphere accommodates conversation and connection.\n"
+        )
+    elif comp == "friends":
+        companion_prompt_chunk = (
+            "COMPANION PROFILE: You are walking with FRIENDS. "
+            "Prioritize social, fun, and group-friendly spaces where multiple people can interact "
+            "(e.g., food halls, park lawns, interactive pop-up galleries, lively breweries, game cafes).\n"
+        )
+    elif comp == "pet":
+        companion_prompt_chunk = (
+            "COMPANION PROFILE: You are walking with a PET (dog-friendly). "
+            "You MUST strictly prioritize open-air, outdoor dog-friendly spaces "
+            "(e.g., public parks, waterfront paths, open-air cafes with dog-friendly patios, pet boutiques). "
+            "Avoid strictly indoor spaces where pets are prohibited unless there is an outdoor seating option.\n"
+        )
+
     exclude_prompt_chunk = ""
     if previously_selected:
         exclude_prompt_chunk = (
@@ -539,10 +664,12 @@ def _call_openai_single_route_sync(
             "free museums, public libraries, landmarks, open plazas, or public sights. "
             "Do NOT select any commercial restaurants, bars, cafes, or retail stores unless "
             "the stop is strictly for a free activity (e.g. browsing a public space) "
-            "and specify that it does not require a purchase.\n"
+            "and specify that it does not require a purchase. "
+            "If a venue has no confirmed free entry, DO NOT select it. Only pick venues where entry is definitively free: "
+            "public parks, free museums on free-entry days, public plazas, public libraries, or stated free attractions.\n"
         )
 
-    system_prompt = f"""You are Wander — an urban experience curator with encyclopedic local knowledge.
+    system_prompt = f"""You are wander — an urban experience curator with encyclopedic local knowledge.
 Your life isn't a chore; wander. Help the user feel that.
 
 VERIFIED VENUES (sourced from Google Places — these are real, confirmed businesses, sorted in order of geographical progression from Start (0%) to End (100%)):
@@ -553,10 +680,31 @@ The route must use exactly {_stops} stops chosen ONLY from the numbered list abo
 
 TIME BUDGET: {request.time_budget_minutes} minutes TOTAL.
 → TARGET: The route should USE approximately {request.time_budget_minutes} minutes.
-→ Each stop should have duration_mins of approximately {_per_stop_mins} minutes (scale up for longer budgets).
+→ IMPORTANT: Do NOT split duration_mins evenly across stops. Assign realistic durations based on venue type:
+
+VENUE TYPE DURATION TABLE (use as your reference — adjust within ranges based on vibe and companion):
+  • coffee shop / café / espresso bar     → 15–25 min  (quick fuel-up, not a sit-down meal)
+  • cocktail bar / wine bar / brewery     → 25–45 min  (a drink or two, social pace)
+  • restaurant / brunch spot              → 35–60 min  (depends on companion; date = longer)
+  • art gallery / museum                  → 30–60 min  (browsing, reading labels, absorbing)
+  • bookstore / record shop / boutique    → 20–40 min  (browsing, discovery)
+  • park / garden / waterfront / plaza    → 15–35 min  (stroll, sit, decompress)
+  • market / food hall                    → 25–45 min  (tasting, wandering stalls)
+  • cultural landmark / historic site     → 20–35 min  (viewing, photo, reflection)
+  • spa / wellness / fitness              → 45–90 min  (experience-based)
+  • rooftop / scenic viewpoint            → 15–25 min  (soak in the view, move on)
+
+Rules for duration:
+  1. Vary durations meaningfully — no two stops should have the exact same duration unless it's genuinely fitting.
+  2. Ensure: sum of all duration_mins + sum of all walk_to_next_mins + initial_walk_mins ≤ {request.time_budget_minutes}.
+  3. If budget is tight, shorten coffee/viewpoint stops first. Never cut a gallery or restaurant below its minimum.
+  4. Solo and pet walks trend shorter per stop; date and friends trend longer.
+
+For reference, remaining time after walking ≈ {_per_stop_mins * _stops} min to split across {_stops} stops.
 
 {weather_prompt_chunk}
 {time_prompt_chunk}
+{companion_prompt_chunk}
 {exclude_prompt_chunk}
 {free_prompt_chunk}
 
@@ -686,9 +834,10 @@ async def _enrich_route(
         end_lng=end_ll["lng"] if end_ll else None,
         waypoints=waypoints,
         navigation_deep_link=build_maps_deep_link(
-            request.start_location,
-            request.end_location,
-            [w.address_hint for w in waypoints],
+            f"{start_ll['lat']},{start_ll['lng']}" if start_ll else request.start_location,
+            f"{end_ll['lat']},{end_ll['lng']}" if end_ll else request.end_location,
+            [f"{w.lat},{w.lng}" if (w.lat is not None and w.lng is not None) else w.address_hint for w in waypoints],
+            [w.place_id for w in waypoints if w.place_id],
         ),
     )
 
@@ -712,6 +861,13 @@ def root():
 async def generate_route(request: RouteRequest):
     async def event_generator():
         try:
+            # 0. Stops-vs-Budget Heuristic Check
+            req_stops = request.num_stops or 3
+            if request.time_budget_minutes < req_stops * 15:
+                raise Exception(
+                    f"impossible: a {request.time_budget_minutes}m budget is too short for {req_stops} stops (each stop needs 15m minimum)"
+                )
+
             # 1. Geocode
             yield "data: " + json.dumps({"type": "status", "message": "pinpointing locations..."}) + "\n\n"
             await asyncio.sleep(0.05)
@@ -845,11 +1001,29 @@ async def generate_route(request: RouteRequest):
                             
                             place["progression"] = max(0.0, min(1.0, progression))
                             venues.append(place)
+            # ── Fix #5: Better freeOnly filter ───────────────────────────────
             if request.free_only:
-                venues = [
-                    v for v in venues
-                    if v.get("price_level") not in ["PRICE_LEVEL_MODERATE", "PRICE_LEVEL_EXPENSIVE", "PRICE_LEVEL_VERY_EXPENSIVE"]
-                ]
+                FREE_FRIENDLY_TYPES = {
+                    "park", "tourist_attraction", "museum", "library",
+                    "art_gallery", "place_of_worship", "natural_feature", "point_of_interest",
+                }
+                COMMERCIAL_FOOD_TYPES = {
+                    "restaurant", "bar", "cafe", "food", "bakery", "night_club", "liquor_store",
+                }
+                def _is_free_friendly(v: Dict) -> bool:
+                    price = v.get("price_level")
+                    # Exclude definitively paid venues
+                    if price in ["PRICE_LEVEL_MODERATE", "PRICE_LEVEL_EXPENSIVE", "PRICE_LEVEL_VERY_EXPENSIVE"]:
+                        return False
+                    types_set = set(v.get("types", []))
+                    # Always keep free-friendly venue types
+                    if types_set & FREE_FRIENDLY_TYPES:
+                        return True
+                    # Exclude commercial food/drink venues with no price signal (likely paid)
+                    if types_set and types_set.issubset(COMMERCIAL_FOOD_TYPES) and price is None:
+                        return False
+                    return True
+                venues = [v for v in venues if _is_free_friendly(v)]
             
             # Raise an explicit exception if we cannot construct a valid RAG route
             req_stops = request.num_stops if request.num_stops else 3
@@ -863,11 +1037,9 @@ async def generate_route(request: RouteRequest):
             # Sort the final candidates by geographical progression to prevent backtracking and ease LLM sequencing
             venues.sort(key=lambda x: x.get("progression", 0.0))
 
-            route_types = [
-                ("Route 1 (scenic & relaxed)", "scenic/relaxed walking experience"),
-                ("Route 2 (culturally dense)", "culturally rich itinerary with bookstores, galleries, or history"),
-                ("Route 3 (focused & social)", "highly social, focused, and lively path")
-            ]
+            # ── Fix #9: Dynamic route archetypes based on vibe ────────────────
+            route_types_list = VIBE_ROUTE_ARCHETYPES.get(request.vibe, DEFAULT_ARCHETYPES)
+            route_types = [(f"Route {i+1} ({label})", desc) for i, (label, desc) in enumerate(route_types_list)]
 
             previously_selected = []
             
@@ -946,7 +1118,7 @@ def get_share(id: str):
 
 @app.get("/api/reverse-geocode")
 async def reverse_geocode(lat: float, lng: float):
-    """Securely reverse geocode coordinates to a human-readable address."""
+    """Securely reverse geocode coordinates to a neighborhood name for passport stamps."""
     if not GOOGLE_KEY:
         raise HTTPException(status_code=500, detail="Google Maps API Key not configured")
     
@@ -955,8 +1127,247 @@ async def reverse_geocode(lat: float, lng: float):
         resp = await client.get(url)
         data = resp.json()
         if data.get("status") == "OK" and data.get("results"):
-            # Use the first formatted address (usually the most specific)
-            return {"address": data["results"][0]["formatted_address"]}
+            result = data["results"][0]
+            formatted_address = result.get("formatted_address", f"{lat:.4f}, {lng:.4f}")
+
+            # ── Fix #3: Extract neighborhood from address_components ──────────
+            components = result.get("address_components", [])
+            neighborhood = None
+            # Try types in priority order
+            for target_type in ["neighborhood", "sublocality_level_1", "sublocality", "locality"]:
+                for comp in components:
+                    if target_type in comp.get("types", []):
+                        neighborhood = comp["long_name"]
+                        break
+                if neighborhood:
+                    break
+
+            # Fallback: split formatted_address and take the second-to-last component before state
+            if not neighborhood:
+                parts = [p.strip() for p in formatted_address.split(",")]
+                # formatted_address is typically: street, neighborhood/city, state zip, country
+                if len(parts) >= 3:
+                    neighborhood = parts[-3]  # second-to-last before "State ZIP, Country"
+                elif len(parts) >= 2:
+                    neighborhood = parts[-2]
+                else:
+                    neighborhood = formatted_address
+
+            return {"address": neighborhood, "full_address": formatted_address}
         
         # If ZERO_RESULTS or other errors, fallback to coordinates
-        return {"address": f"{lat:.4f}, {lng:.4f}"}
+        return {"address": f"{lat:.4f}, {lng:.4f}", "full_address": f"{lat:.4f}, {lng:.4f}"}
+
+
+@app.post("/api/pacing-advisor", response_model=AdvisorResponse)
+async def pacing_advisor(request: AdvisorRequest):
+    # Try geocoding start and end
+    start_ll = await geocode_location(request.start_location)
+    end_ll = await geocode_location(request.end_location)
+    
+    if not start_ll:
+        start_ll = {"lat": 40.7580, "lng": -73.9855} # default NYC
+    if not end_ll:
+        end_ll = start_ll
+        
+    dist_m = _coordinate_distance_m(start_ll, end_ll)
+    # Estimate base walk minutes (80m/min walking speed)
+    base_walk_mins = int((dist_m * 1.3) / 80.0)
+    
+    # Heuristics safety check: force impossible status if budget is less than 15 mins per stop
+    if request.time_budget_minutes < request.num_stops * 15:
+        return AdvisorResponse(
+            detected_neighborhood="unknown neighborhood",
+            density_level="medium",
+            recommended_stops=max(2, request.time_budget_minutes // 15),
+            pacing_message=f"impossible: a {request.time_budget_minutes}m budget is too short for {request.num_stops} stops (each stop needs 15m minimum)",
+            feasibility_status="impossible",
+            density_badge_message="tight spacing detected",
+            weather_advice="too rushed to enjoy"
+        )
+        
+    if base_walk_mins > (request.time_budget_minutes - 10):
+        return AdvisorResponse(
+            detected_neighborhood="unknown neighborhood",
+            density_level="medium",
+            recommended_stops=2,
+            pacing_message=f"impossible: walking directly between these places takes {base_walk_mins}m, exceeding your {request.time_budget_minutes}m budget",
+            feasibility_status="impossible",
+            density_badge_message="locations too far",
+            weather_advice="locations are too far apart"
+        )
+
+    # Call weather API at start location
+    weather_info = await _get_weather(start_ll["lat"], start_ll["lng"])
+    weather_str = "unknown weather"
+    if weather_info:
+        weather_str = f"{weather_info['main']} ({weather_info['description']}), {weather_info['temp_c']}°C"
+        
+    system_prompt = (
+        "you are a smart walking pacing advisor for the 'wander' app. "
+        "your goal is to evaluate if a walking itinerary is feasible and provide a warm, all-lowercase advice message.\n\n"
+        "guidelines:\n"
+        "1. never use any capital letters (e.g. use 'chelsea', not 'Chelsea').\n"
+        "2. never end any sentences with a period. use playful, relaxed punctuation (like commas or exclamation marks if needed).\n"
+        "3. assess the walking distance (in meters), budget (in minutes), requested stop count, weather, companion type, and local time.\n"
+        "4. assign a feasibility_status:\n"
+        "   - 'optimal' if there is plenty of time to walk and enjoy each stop (at least 15-20 minutes per stop + walk time).\n"
+        "   - 'tight' if they are cutting it close (under 15 minutes per stop including walking, but physically possible).\n"
+        "   - 'impossible' if the base walk time alone exceeds the budget, or if budget is less than 12 mins per stop.\n"
+        "5. detect the neighborhood based on the start/end location (e.g. 'greenwich village').\n"
+        "6. detect density: 'high' for high-density areas (many venues nearby, e.g. Manhattan, downtowns), 'medium', or 'low'.\n"
+        "7. recommend an optimal stop count (recommended_stops) between 2 and 5: high density allows more stops (3-4), low density or adverse weather should recommend fewer stops (2-3).\n"
+        "8. provide a pacing_message in lowercase explaining your assessment (e.g. '3 stops is perfect for a breezy stroll through Soho').\n"
+        "9. write a density_badge_message like: 'density-optimized: 3 stops suggested for greenwich village'.\n"
+        "10. write a weather_advice string if weather is rainy/cold (e.g., 'rainy today: we recommend 2 indoor stops')."
+    )
+
+    # Query OpenAI to get the advice
+    loop = asyncio.get_event_loop()
+    try:
+        response = await loop.run_in_executor(
+            None,
+            lambda: openai_client.beta.chat.completions.parse(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Start Location: {request.start_location}\n"
+                            f"End Location: {request.end_location}\n"
+                            f"Distance: {dist_m:.1f} meters (direct line), base walk time: {base_walk_mins} minutes\n"
+                            f"Time Budget: {request.time_budget_minutes} minutes\n"
+                            f"Requested Stops: {request.num_stops}\n"
+                            f"Companion: {request.companion}\n"
+                            f"Local Time: {request.local_time or 'unknown'}\n"
+                            f"Current Weather: {weather_str}"
+                        )
+                    }
+                ],
+                response_format=AdvisorResponse,
+                temperature=0.2
+            )
+        )
+        parsed = response.choices[0].message.parsed
+        # If there's weather advice and weather is adverse, fill it
+        if weather_info and weather_info["is_adverse"] and not parsed.weather_advice:
+            parsed.weather_advice = f"rainy weather: we recommend choosing fewer outdoor stops today"
+        
+        # Enforce all-lowercase branding and period-free on text fields
+        parsed.detected_neighborhood = parsed.detected_neighborhood.lower().rstrip(".")
+        parsed.pacing_message = parsed.pacing_message.lower().rstrip(".")
+        parsed.density_badge_message = parsed.density_badge_message.lower().rstrip(".")
+        if parsed.weather_advice:
+            parsed.weather_advice = parsed.weather_advice.lower().rstrip(".")
+            
+        return parsed
+    except Exception as e:
+        print(f"Error calling pacing advisor LLM: {e}")
+        # fallback
+        return AdvisorResponse(
+            detected_neighborhood="local area",
+            density_level="medium",
+            recommended_stops=request.num_stops,
+            pacing_message=f"looks good: {request.num_stops} stops in {request.time_budget_minutes}m",
+            feasibility_status="optimal",
+            density_badge_message="density-optimized suggestions active",
+            weather_advice=None
+        )
+
+
+@app.post("/api/suggest-vibe-preset", response_model=PresetsResponse)
+async def suggest_vibe_preset(request: PresetRequest):
+    start_ll = await geocode_location(request.start_location)
+    if not start_ll:
+        start_ll = {"lat": 40.7580, "lng": -73.9855} # default NYC
+        
+    weather_info = await _get_weather(start_ll["lat"], start_ll["lng"])
+    weather_str = "unknown weather"
+    if weather_info:
+        weather_str = f"{weather_info['main']} ({weather_info['description']}), {weather_info['temp_c']}°C"
+        
+    preset_system_prompt = (
+        "you are a creative walk planner for the 'wander' app. "
+        "your goal is to recommend exactly 3 highly personalized, localized walking presets based on the start location, local time, and weather.\n\n"
+        "guidelines:\n"
+        "1. never use any capital letters (e.g. use 'hell\\'s kitchen stroll', not 'Hell\\'s Kitchen Stroll').\n"
+        "2. never end any sentences with a period. use playful, relaxed punctuation (like commas or exclamation marks if needed).\n"
+        "3. return exactly 3 presets tailored to the conditions:\n"
+        "   - morning: suggest breakfast, bakeries, coffee walks.\n"
+        "   - evening/night: suggest cozy bars, twilight vistas, illuminated lanes.\n"
+        "   - rainy/cold: suggest indoor passages, museums, covered food courts, art halls.\n"
+        "   - companion profiles: assign varied companions ('solo', 'date', 'friends', 'pet') to show options.\n"
+        "4. assign a catch title (title) like 'espresso crawl' or 'quiet garden loop'.\n"
+        "5. assign a vibe string (vibe) which is a list of comma-separated search terms or description (e.g. 'bookstore, small cafe, art gallery').\n"
+        "6. assign a recommended time_budget in minutes (typically 60 to 120).\n"
+        "7. assign a recommended num_stops (between 2 and 5).\n"
+        "8. assign free_only boolean (True or False).\n"
+        "9. assign companion ('solo' | 'date' | 'friends' | 'pet').\n"
+        "10. write a short reason (reason) explaining why this fits the time of day, weather, or location (e.g. 'perfect for a warm date night sunset walk')."
+    )
+
+    loop = asyncio.get_event_loop()
+    temperature = 1.1 if request.refresh else 0.8
+    try:
+        response = await loop.run_in_executor(
+            None,
+            lambda: openai_client.beta.chat.completions.parse(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": preset_system_prompt},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Start Location: {request.start_location}\n"
+                            f"Local Time: {request.local_time or 'unknown'}\n"
+                            f"Current Weather: {weather_str}"
+                        )
+                    }
+                ],
+                response_format=PresetsResponse,
+                temperature=temperature
+            )
+        )
+        parsed = response.choices[0].message.parsed
+        # Enforce all-lowercase branding and period-free on text fields
+        for p in parsed.presets:
+            p.title = p.title.lower().rstrip(".")
+            p.vibe = p.vibe.lower().rstrip(".")
+            p.reason = p.reason.lower().rstrip(".")
+            
+        return parsed
+    except Exception as e:
+        print(f"Error calling vibe preset LLM: {e}")
+        # fallback
+        return PresetsResponse(
+            presets=[
+                PresetOption(
+                    title="cozy cafe stroll",
+                    vibe="bakery, indie cafe, cozy seating",
+                    time_budget=90,
+                    num_stops=3,
+                    free_only=False,
+                    companion="solo",
+                    reason="perfect for a quiet coffee break in the neighborhood"
+                ),
+                PresetOption(
+                    title="green garden wander",
+                    vibe="public park, green space, botanical garden",
+                    time_budget=60,
+                    num_stops=2,
+                    free_only=True,
+                    companion="pet",
+                    reason="an outdoor loop tailored for fresh air and pets"
+                ),
+                PresetOption(
+                    title="culture & history walk",
+                    vibe="museum, library, historic landmark",
+                    time_budget=120,
+                    num_stops=4,
+                    free_only=False,
+                    companion="friends",
+                    reason="a comprehensive cultural tour with friends"
+                )
+            ]
+        )

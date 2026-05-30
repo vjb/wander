@@ -1,43 +1,43 @@
-# Wander
+# wander
 
-![Wander Banner](assets/banner.png)
+![wander banner](assets/banner.png)
 
-> *Any city has secrets to share. Wander them.*
+> *stop commuting. start wandering*
 
-An AI-powered urban experience curator that turns a walk between any two points into three distinct, navigation-ready walking routes. Wander is built for both out-of-town travelers landing in a new destination and locals looking to discover the hidden layers of their own streets. It transforms standard A-to-B transit into curated, slow-paced exploration.
+an ai-powered urban experience curator that turns a walk between any two points into three distinct, navigation-ready walking routes. wander is built for both out-of-town travelers landing in a new destination and locals looking to discover the hidden layers of their own streets. it transforms standard a-to-b transit into curated, slow-paced exploration.
 
 ---
 
-## What It Does
+## what it does
 
-Wander accepts a starting location, an ending location, a time budget, and a desired vibe (using presets or custom natural language). 
+wander accepts a starting location, an ending location, a time budget, and a desired vibe (using presets or custom natural language). 
 
 <div align="center">
-  <img src="assets/01-landing.png" width="800" alt="Wander Landing Screen" />
+  <img src="assets/01-landing.png" width="800" alt="wander landing screen" />
   <br/><br/>
-  <img src="assets/02-form-filled.png" width="800" alt="Wander Input Form" />
+  <img src="assets/02-form-filled.png" width="800" alt="wander input form" />
   <br/><br/>
-  <img src="assets/04-route.png" width="800" alt="Wander Generated Route" />
+  <img src="assets/04-route.png" width="800" alt="wander generated route" />
 </div>
 
-### How It Works:
-1. **Curate the Vibe**: Select one of four vibe presets (including the loop-optimized *Mental Break ⏱️*) or type a completely custom request (e.g., *"spicy noodles, vintage clothing stores, and a quiet park"*).
-2. **Loop Option**: Toggle the round-trip button `🔁` to automatically sync the start and end coordinates, converting the main CTA into `"generate three round-trip loops"`.
-3. **Sequential Streaming**: Wander geocodes the inputs, checks local weather, and performs a parallel radar search using the Google Places API. It streams three unique routes to the frontend in real time using Server-Sent Events (SSE). Route 1 displays instantly, while Route 2 and Route 3 continue loading in the background.
-4. **Feasibility Validation**: The backend queries the Google Directions API to verify that the walking path is actually possible within the user's time budget (allocating a mandatory 15-minute buffer per venue).
-5. **Ready to Navigate**: Expand venues to read curated "insider tips", check live Google rating badges, download a custom `.ics` calendar file pre-loaded with stop durations and details, or tap **Start Wandering** to open the entire multi-stop walking tour inside Google Maps for turn-by-turn navigation.
+### how it works:
+1. **curate the vibe**: select one of four vibe presets (including the loop-optimized *mental break ⏱️*) or type a completely custom request (e.g., *"spicy noodles, vintage clothing stores, and a quiet park"*).
+2. **loop option**: toggle the round-trip button `🔁` to automatically sync the start and end coordinates, converting the main cta into `"generate three round-trip loops"`.
+3. **sequential streaming**: wander geocodes the inputs, checks local weather, and performs a parallel radar search using the google places api. it streams three unique routes to the frontend in real time using server-sent events (sse). route 1 displays instantly, while route 2 and route 3 continue loading in the background.
+4. **feasibility validation**: the backend queries the google directions api to verify that the walking path is actually possible within the user's time budget (allocating a mandatory 15-minute buffer per venue).
+5. **ready to navigate**: expand venues to read curated "insider tips", check live google rating badges, download a custom `.ics` calendar file pre-loaded with stop durations and details, or tap **start wandering** to open the entire multi-stop walking tour inside google maps for turn-by-turn navigation.
 
 ---
 
-## Key Features
+## key features
 
-* 🔁 **Loop & Round-Trip Sync**: Perfect for short breaks or round-trips from a hotel or office. Click the loop icon `🔁` to lock the end destination to the starting point.
-* ⏱️ **Mental Break Preset**: A preset card specifically optimized for brief loop routes (e.g. coffee, quick fresh air, short loop) utilizing an adaptive search radius in the backend.
-* 🎭 **Zero-Hallucination RAG**: Venues are queried directly from the Google Places API (New) along the route corridor. The AI is strictly forbidden from inventing stops, ensuring every recommendation is a real, operational business with current ratings.
-* 🌦️ **Weather-Aware Curation**: Pulls current weather at the starting location. If it is raining, snowing, or storming, the backend automatically instructs the LLM to skip parks or rooftop venues in favor of indoor stops (museums, indoor markets, cozy cafes, libraries).
-* 🕒 **Daypart Transitioning**: Automatically adapts recommendations to the time of day (e.g. no breakfast spots at 8 PM; sunset transitions are scheduled logically if the route spans from afternoon to night).
-* 📅 **Add to Calendar (ICS)**: Download fully-formed calendar events (`.ics`) preloaded with address details, ratings, stop durations, and direct Google Maps deep links.
-* 📱 **PWA Installable**: Fully configured Progressive Web App with service worker caching. Install it on iOS or Android directly from the browser for a full-screen native feel.
+* 🔁 **loop & round-trip sync**: perfect for short breaks or round-trips from a hotel or office. click the loop icon `🔁` to lock the end destination to the starting point.
+* ⏱️ **mental break preset**: a preset card specifically optimized for brief loop routes (e.g. coffee, quick fresh air, short loop) utilizing an adaptive search radius in the backend.
+* 🎭 **zero-hallucination rag**: venues are queried directly from the google places api (new) along the route corridor. the ai is strictly forbidden from inventing stops, ensuring every recommendation is a real, operational business with current ratings.
+* 🌦️ **weather-aware curation**: pulls current weather at the starting location. if it is raining, snowing, or storming, the backend automatically instructs the llm to skip parks or rooftop venues in favor of indoor stops (museums, indoor markets, cozy cafes, libraries).
+* 🕒 **daypart transitioning**: automatically adapts recommendations to the time of day (e.g. no breakfast spots at 8 pm; sunset transitions are scheduled logically if the route spans from afternoon to night).
+* 📅 **add to calendar (ics)**: download fully-formed calendar events (`.ics`) preloaded with address details, ratings, stop durations, and direct google maps deep links.
+* 📱 **pwa installable**: fully configured progressive web app with service worker caching. install it on ios or android directly from the browser for a full-screen native feel.
 
 ---
 
@@ -215,7 +215,7 @@ TAVILY_API_KEY="tvly-..."
 
 ## Verification & Testing
 
-Wander comes equipped with a comprehensive validation suite:
+wander comes equipped with a comprehensive validation suite:
 
 ```bash
 # Verify Google Geocoding, Places (New), and Directions APIs are active & keys are valid

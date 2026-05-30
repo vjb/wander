@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence, type Variants } from "framer-motion";
 import {
   MapPin,
@@ -21,15 +21,24 @@ import {
   Calendar,
   Sliders,
   Sparkles,
+  BookOpen,
+  CheckCircle2,
+  Radio,
+  X,
+  Trash2,
 } from "lucide-react";
 
 import { MapPreview } from "./components/MapPreview";
 import { RotatingTagline } from "./components/RotatingTagline";
+import { useWalkMode } from "./hooks/useWalkMode";
+import { usePassport, type PassportEntry } from "./hooks/usePassport";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Screen = "input" | "loading" | "route";
 type VibeId = "Caffeinated & Cultured" | "Green & Scenic" | "Spontaneous & Social" | "Mental Break";
+
+export type { PassportEntry };
 
 interface WaypointV3 {
   order: number;
@@ -65,6 +74,26 @@ interface WanderRouteOptionV3 {
 interface WanderV3Response {
   routes: WanderRouteOptionV3[];
   weather_context?: string | null;
+}
+
+interface AdvisorResponse {
+  detected_neighborhood: string;
+  density_level: string;
+  recommended_stops: number;
+  pacing_message: string;
+  feasibility_status: "optimal" | "tight" | "impossible";
+  density_badge_message: string;
+  weather_advice: string | null;
+}
+
+interface PresetOption {
+  title: string;
+  vibe: string;
+  time_budget: number;
+  num_stops: number;
+  free_only: boolean;
+  companion: string;
+  reason: string;
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -179,6 +208,14 @@ function InputScreen({
   deferredPrompt,
   numStops, setNumStops,
   freeOnly, setFreeOnly,
+  advisorData, advisorLoading, clientFeasibility,
+  presets, presetsLoading,
+  presetsRefreshing, onRefreshPresets,
+  selectedPresetIdx, setSelectedPresetIdx,
+  companion, setCompanion,
+  setHasManuallySetStops,
+  passportCount,
+  onOpenPassport,
 }: {
   start: string; setStart: (v: string) => void;
   end: string; setEnd: (v: string) => void;
@@ -192,6 +229,20 @@ function InputScreen({
   deferredPrompt: any;
   numStops: number; setNumStops: (v: number) => void;
   freeOnly: boolean; setFreeOnly: (v: boolean) => void;
+  advisorData: AdvisorResponse | null;
+  advisorLoading: boolean;
+  clientFeasibility: { status: "impossible" | "tight"; message: string } | null;
+  presets: PresetOption[];
+  presetsLoading: boolean;
+  presetsRefreshing: boolean;
+  onRefreshPresets: () => void;
+  selectedPresetIdx: number | null;
+  setSelectedPresetIdx: (v: number | null) => void;
+  companion: string;
+  setCompanion: (v: string) => void;
+  setHasManuallySetStops: (v: boolean) => void;
+  passportCount: number;
+  onOpenPassport: () => void;
 }) {
   const canWander = start.trim().length > 0 && end.trim().length > 0 && (vibe !== "" || customVibe.trim().length > 0);
 
@@ -223,6 +274,17 @@ function InputScreen({
           <span className="text-[11px] font-medium tracking-[0.35em] uppercase text-[#8ba88e]/70" style={{ fontFamily: "var(--font-inter)" }}>
             wander
           </span>
+          {passportCount > 0 && (
+            <button
+              onClick={onOpenPassport}
+              className="ml-1 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#e5d3b3]/10 border border-[#e5d3b3]/25 text-[#e5d3b3]/70 text-[10px] font-medium tracking-wide hover:bg-[#e5d3b3]/20 hover:text-[#e5d3b3] transition-all duration-200"
+              style={{ fontFamily: "var(--font-inter)" }}
+              title="Open your neighborhood passport"
+            >
+              <BookOpen className="w-3 h-3" strokeWidth={1.5} />
+              {passportCount} {passportCount === 1 ? "neighborhood" : "neighborhoods"}
+            </button>
+          )}
           {deferredPrompt && (
             <button
               onClick={async () => {
@@ -294,6 +356,106 @@ function InputScreen({
               />
             </div>
           </div>
+
+          {/* Presets Carousel — hidden when advisor has already flagged impossible */}
+          {start.trim().length > 0 && (presetsLoading || presets.length > 0) && advisorData?.feasibility_status !== "impossible" && (
+            <div className="mb-8 border-t border-[#f4f4f5]/6 pt-6">
+              <div className="flex items-center justify-between mb-4">
+                <p className="flex items-center gap-2 text-[#f4f4f5]/40 text-[11px] font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-inter)" }}>
+                  <Sparkles className="w-3.5 h-3.5 text-[#8ba88e]" strokeWidth={1.5} />
+                  suggested wanders for you
+                </p>
+                <button
+                  onClick={onRefreshPresets}
+                  disabled={presetsLoading || presetsRefreshing}
+                  className="p-1 rounded-full text-[#8ba88e]/50 hover:text-[#8ba88e] hover:bg-[#8ba88e]/10 transition-all disabled:opacity-30"
+                  title="get new suggestions"
+                >
+                  <RotateCcw className={`w-3.5 h-3.5 ${presetsRefreshing ? 'animate-spin' : ''}`} strokeWidth={1.5} />
+                </button>
+              </div>
+              
+              <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x">
+                {presetsLoading ? (
+                  Array.from({ length: 3 }).map((_, idx) => (
+                    <div 
+                      key={idx} 
+                      className="w-[200px] shrink-0 glass border border-[#f4f4f5]/6 rounded-2xl p-4 animate-pulse flex flex-col gap-2.5 min-h-[110px]"
+                    >
+                      <div className="h-4 bg-[#f4f4f5]/10 rounded w-3/4" />
+                      <div className="h-3 bg-[#f4f4f5]/5 rounded w-5/6" />
+                      <div className="flex gap-2">
+                        <div className="h-5 bg-[#f4f4f5]/10 rounded-full w-12" />
+                        <div className="h-5 bg-[#f4f4f5]/10 rounded-full w-16" />
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  presets.map((preset, idx) => {
+                    const companionEmojis: Record<string, string> = {
+                      solo: "🧍",
+                      date: "🕯️",
+                      friends: "🍻",
+                      pet: "🐶"
+                    };
+                    
+                    return (
+                      <motion.button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setCustomVibe(preset.vibe);
+                          setVibe("");
+                          setTimeBudget(preset.time_budget);
+                          setNumStops(preset.num_stops);
+                          setHasManuallySetStops(false);
+                          setFreeOnly(preset.free_only);
+                          setCompanion(preset.companion);
+                          setSelectedPresetIdx(idx);
+                          // Scroll to wander button so user sees their selection applied
+                          setTimeout(() => {
+                            document.getElementById('wander-button')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          }, 150);
+                        }}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        className={`w-[220px] shrink-0 glass border text-left p-4 rounded-2xl cursor-pointer transition-all duration-300 flex flex-col justify-between min-h-[125px] snap-start ${
+                          selectedPresetIdx === idx
+                            ? 'border-[#8ba88e]/60 shadow-[0_0_20px_rgba(139,168,142,0.2)] bg-[#8ba88e]/5'
+                            : 'border-[#f4f4f5]/6 hover:border-[#8ba88e]/30'
+                        }`}
+                      >
+                        <div>
+                          <h4 className="text-[#f4f4f5] text-[13px] font-semibold tracking-wide mb-1 lowercase" style={{ fontFamily: "var(--font-inter)" }}>
+                            {preset.title}
+                          </h4>
+                          <p className="text-[#f4f4f5]/50 text-[10px] leading-relaxed mb-3 lowercase font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                            {preset.reason}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 mt-auto">
+                          <span className="px-2 py-0.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/60 text-[9px] font-light uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>
+                            {companionEmojis[preset.companion] || "🧍"} {preset.companion}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/60 text-[9px] font-light uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>
+                            📍 {preset.num_stops} stops
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/60 text-[9px] font-light uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>
+                            ⏱️ {preset.time_budget}m
+                          </span>
+                          {preset.free_only && (
+                            <span className="px-2 py-0.5 rounded-full bg-[#8ba88e]/10 text-[#8ba88e] text-[9px] font-medium uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>
+                              free
+                            </span>
+                          )}
+                        </div>
+                      </motion.button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Time Budget */}
           <div className="mb-8">
@@ -388,7 +550,7 @@ function InputScreen({
             <div className="mb-5">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[#f4f4f5]/60 text-xs font-light" style={{ fontFamily: "var(--font-inter)" }}>
-                  Number of stops
+                  number of stops
                 </span>
                 <span className="text-[#e5d3b3] text-xs font-medium" style={{ fontFamily: "var(--font-inter)" }}>
                   {numStops} {numStops === 1 ? 'stop' : 'stops'}
@@ -401,10 +563,13 @@ function InputScreen({
                 max={5}
                 step={1}
                 value={numStops}
-                onChange={(e) => setNumStops(Number(e.target.value))}
+                onChange={(e) => {
+                  setNumStops(Number(e.target.value));
+                  setHasManuallySetStops(true);
+                }}
               />
               <div className="flex justify-between text-[#f4f4f5]/25 text-[10px] mt-1 font-light" style={{ fontFamily: "var(--font-inter)" }}>
-                <span>2 stops</span><span>3 stops</span><span>4 stops</span><span>5 stops</span>
+                <span>2</span><span>3</span><span>4</span><span>5</span>
               </div>
             </div>
 
@@ -413,7 +578,7 @@ function InputScreen({
               <div className="flex items-center gap-2">
                 <Sparkles className="w-3.5 h-3.5 text-[#e5d3b3]" strokeWidth={1.5} />
                 <span className="text-[#f4f4f5]/60 text-xs font-light" style={{ fontFamily: "var(--font-inter)" }}>
-                  Prefer free stops only
+                  prefer free stops only
                 </span>
               </div>
               <button
@@ -432,13 +597,110 @@ function InputScreen({
                 />
               </button>
             </div>
+
+            {/* Companion Row */}
+            <div className="border-t border-[#f4f4f5]/6 pt-4 mt-4">
+              <span className="text-[#f4f4f5]/60 text-xs font-light block mb-3" style={{ fontFamily: "var(--font-inter)" }}>
+                who are you wandering with
+              </span>
+              <div className="flex gap-2 flex-wrap">
+                {[
+                  { id: "solo", label: "solo", icon: "🧍" },
+                  { id: "date", label: "date", icon: "🕯️" },
+                  { id: "friends", label: "friends", icon: "🍻" },
+                  { id: "pet", label: "pet", icon: "🐶" }
+                ].map((item) => {
+                  const active = companion === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setCompanion(item.id)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium border flex items-center gap-1.5 transition-all duration-200 cursor-pointer ${
+                        active 
+                          ? "bg-[#8ba88e]/10 border-[#8ba88e] text-[#8ba88e]" 
+                          : "bg-transparent border-[#f4f4f5]/6 hover:border-[#f4f4f5]/15 text-[#f4f4f5]/55"
+                      }`}
+                      style={{ fontFamily: "var(--font-inter)" }}
+                    >
+                      <span>{item.icon}</span>
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
+
+          {/* AI Pacing & Feasibility Advisor */}
+          {start.trim().length > 0 && end.trim().length > 0 && (advisorLoading || advisorData) && (
+            <div className="mb-6">
+              {advisorLoading ? (
+                <div className="glass border border-[#f4f4f5]/6 rounded-2xl p-4 animate-pulse flex items-center gap-3">
+                  <Loader2 className="w-4 h-4 text-[#8ba88e] animate-spin shrink-0" />
+                  <span className="text-[#f4f4f5]/40 text-xs font-light lowercase" style={{ fontFamily: "var(--font-inter)" }}>
+                    reading your neighborhood...
+                  </span>
+                </div>
+              ) : (
+                advisorData && (() => {
+                  // Client-side override wins when sliders produce impossible/tight state
+                  const effectiveStatus = clientFeasibility?.status ?? advisorData.feasibility_status;
+                  const effectiveMessage = clientFeasibility?.message ?? advisorData.pacing_message;
+                  return (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`glass border-l-4 rounded-2xl p-4 shadow-md flex flex-col gap-2 ${
+                        effectiveStatus === "optimal"
+                          ? "border-l-[#8ba88e] border-y border-r border-[#f4f4f5]/6 bg-[#8ba88e]/2"
+                          : effectiveStatus === "tight"
+                          ? "border-l-[#e5d3b3] border-y border-r border-[#f4f4f5]/6 bg-[#e5d3b3]/2"
+                          : "border-l-[#ef4444] border-y border-r border-[#f4f4f5]/6 bg-[#ef4444]/2"
+                      }`}
+                    >
+                      <div className="flex items-start gap-2.5">
+                        <Sparkles className={`w-4 h-4 shrink-0 mt-0.5 ${
+                          effectiveStatus === "optimal"
+                            ? "text-[#8ba88e]"
+                            : effectiveStatus === "tight"
+                            ? "text-[#e5d3b3]"
+                            : "text-[#ef4444]"
+                        }`} strokeWidth={1.5} />
+                        <div className="flex-1">
+                          <p className="text-[#f4f4f5] text-[12px] font-normal leading-relaxed lowercase" style={{ fontFamily: "var(--font-inter)" }}>
+                            {effectiveMessage}
+                          </p>
+
+                          {/* Only show badges when not overridden by client */}
+                          {!clientFeasibility && (
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              {advisorData.density_badge_message && (
+                                <span className="px-2 py-0.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/40 text-[9px] font-light lowercase" style={{ fontFamily: "var(--font-inter)" }}>
+                                  {advisorData.density_badge_message}
+                                </span>
+                              )}
+                              {advisorData.weather_advice && (
+                                <span className="px-2 py-0.5 rounded-full bg-[#8ba88e]/10 text-[#8ba88e]/80 text-[9px] font-light lowercase" style={{ fontFamily: "var(--font-inter)" }}>
+                                  ✨ {advisorData.weather_advice}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })()
+              )}
+            </div>
+          )}
 
           {/* CTA */}
           <motion.button
             id="wander-button"
             onClick={onWander}
-            disabled={!canWander}
+            disabled={!canWander || advisorLoading || advisorData?.feasibility_status === "impossible" || clientFeasibility?.status === "impossible"}
             whileHover={canWander ? { scale: 1.015 } : {}}
             whileTap={canWander ? { scale: 0.985 } : {}}
             transition={{ type: "spring", stiffness: 400, damping: 25 }}
@@ -458,8 +720,10 @@ function InputScreen({
                 </span>
                 <ArrowRight className="w-4 h-4" strokeWidth={2} />
               </>
+            ) : start.trim() && end.trim() ? (
+              "choose a vibe above"
             ) : (
-              "fill in the details above"
+              "add your start & end above"
             )}
           </motion.button>
 
@@ -532,12 +796,51 @@ function LoadingScreen({ message }: { message: string }) {
 
 // ── Waypoint Card ─────────────────────────────────────────────────────────────
 
-function WaypointCard({ waypoint }: { waypoint: WaypointV3 }) {
+function WaypointCard({
+  waypoint,
+  isNearby = false,
+  isVisited = false,
+  dwellSeconds = 0,
+  onManualCheckIn,
+}: {
+  waypoint: WaypointV3;
+  isNearby?: boolean;
+  isVisited?: boolean;
+  dwellSeconds?: number;
+  onManualCheckIn?: () => void;
+}) {
   const [tipOpen, setTipOpen] = useState(false);
+
+  const dwellPercent = Math.min(100, (dwellSeconds / 300) * 100);
 
   return (
     <motion.div variants={cardVariants}>
-      <div className="glass-lighter rounded-2xl overflow-hidden relative">
+      <div
+        className={`glass-lighter rounded-2xl overflow-hidden relative transition-all duration-500 ${
+          isVisited ? "opacity-50" : ""
+        } ${
+          isNearby && !isVisited
+            ? "ring-2 ring-[#8ba88e]/60 shadow-[0_0_28px_rgba(139,168,142,0.25)]"
+            : ""
+        }`}
+      >
+        {/* Nearby pulse ring */}
+        {isNearby && !isVisited && (
+          <motion.div
+            className="absolute inset-0 rounded-2xl border-2 border-[#8ba88e]/40 pointer-events-none"
+            animate={{ opacity: [0.4, 0.9, 0.4], scale: [1, 1.01, 1] }}
+            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+          />
+        )}
+        {/* Visited overlay */}
+        {isVisited && (
+          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+            <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#8ba88e]/20 border border-[#8ba88e]/40 backdrop-blur-sm">
+              <CheckCircle2 className="w-4 h-4 text-[#8ba88e]" strokeWidth={2} />
+              <span className="text-[#8ba88e] text-[12px] font-medium" style={{ fontFamily: "var(--font-inter)" }}>visited</span>
+            </div>
+          </div>
+        )}
 
         {/* ── Photo Banner ── */}
         {waypoint.photo_url && (
@@ -628,11 +931,50 @@ function WaypointCard({ waypoint }: { waypoint: WaypointV3 }) {
           >
             {waypoint.action_description}
           </p>
+          {/* Nearby call-to-action banner */}
+          {isNearby && !isVisited && (
+            <div className="mb-4 flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-[#8ba88e]/10 border border-[#8ba88e]/25">
+              <div className="flex items-center gap-2">
+                <Radio className="w-3.5 h-3.5 text-[#8ba88e] shrink-0" strokeWidth={1.5} />
+                <span className="text-[#8ba88e] text-[12px] font-medium lowercase" style={{ fontFamily: "var(--font-inter)" }}>
+                  {dwellSeconds > 0
+                    ? `you've been here ${Math.floor(dwellSeconds / 60)}m ${dwellSeconds % 60}s — auto check-in in ${Math.max(0, 5 - Math.floor(dwellSeconds / 60))}m`
+                    : "you're close — head inside!"}
+                </span>
+              </div>
+              {onManualCheckIn && (
+                <button
+                  onClick={onManualCheckIn}
+                  className="shrink-0 px-3 py-1 rounded-full bg-[#8ba88e] text-[#131316] text-[10px] font-semibold uppercase tracking-wide hover:bg-[#97b59a] transition-colors"
+                  style={{ fontFamily: "var(--font-inter)" }}
+                >
+                  i'm here
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Dwell progress bar */}
+          {isNearby && !isVisited && dwellSeconds > 0 && (
+            <div className="mb-3 h-1 rounded-full bg-[#8ba88e]/10 overflow-hidden">
+              <motion.div
+                className="h-full rounded-full bg-[#8ba88e]/60"
+                initial={{ width: 0 }}
+                animate={{ width: `${dwellPercent}%` }}
+                transition={{ duration: 0.5, ease: "linear" }}
+              />
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-1.5 text-[#e5d3b3]/60 text-[12px] font-light" style={{ fontFamily: "var(--font-inter)" }}>
-                <Timer className="w-3.5 h-3.5" strokeWidth={1.5} />
-                {waypoint.duration_mins} min
+                {isVisited ? (
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[#8ba88e]" strokeWidth={1.5} />
+                ) : (
+                  <Timer className="w-3.5 h-3.5" strokeWidth={1.5} />
+                )}
+                {isVisited ? "visited" : `${waypoint.duration_mins} min`}
               </div>
               {waypoint.lat && waypoint.lng && (
                  <a
@@ -720,7 +1062,174 @@ function WalkLabel({ mins, origin, destination }: { mins: number, origin?: {lat:
   );
 }
 
-// ── Route Screen ──────────────────────────────────────────────────────────────
+// ── Passport Overlay ─────────────────────────────────────────────────────────
+
+function PassportOverlay({
+  passport,
+  totalStops,
+  onClose,
+  onClear,
+}: {
+  passport: import("./hooks/usePassport").PassportNeighborhood[];
+  totalStops: number;
+  onClose: () => void;
+  onClear: () => void;
+}) {
+  const formatDate = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleDateString([], {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    } catch {
+      return "";
+    }
+  };
+
+  return (
+    <motion.div
+      key="passport-overlay"
+      initial={{ opacity: 0, y: "100%" }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: "100%" }}
+      transition={{ type: "spring", stiffness: 300, damping: 35 }}
+      className="fixed inset-0 z-[100] bg-[#131316] flex flex-col"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 pt-14 pb-6 border-b border-[#f4f4f5]/6">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <BookOpen className="w-4 h-4 text-[#e5d3b3]/60" strokeWidth={1.5} />
+            <span className="text-[11px] font-medium tracking-[0.35em] uppercase text-[#e5d3b3]/40" style={{ fontFamily: "var(--font-inter)" }}>
+              your wander passport
+            </span>
+          </div>
+          {passport.length > 0 && (
+            <p className="text-[#f4f4f5]/30 text-[12px] font-light" style={{ fontFamily: "var(--font-inter)" }}>
+              {passport.length} {passport.length === 1 ? "neighborhood" : "neighborhoods"} · {totalStops} unique {totalStops === 1 ? "stop" : "stops"}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {passport.length > 0 && (
+            <button
+              onClick={() => {
+                if (confirm("clear your entire passport? this cannot be undone.")) onClear();
+              }}
+              className="p-2 rounded-xl text-[#f4f4f5]/20 hover:text-red-400/60 hover:bg-red-400/5 transition-colors"
+              title="Clear passport"
+            >
+              <Trash2 className="w-4 h-4" strokeWidth={1.5} />
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="p-2 rounded-xl text-[#f4f4f5]/30 hover:text-[#f4f4f5]/70 hover:bg-[#f4f4f5]/5 transition-colors"
+          >
+            <X className="w-5 h-5" strokeWidth={1.5} />
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto px-5 py-6 space-y-4">
+        {passport.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-center py-24">
+            <div className="text-5xl mb-6">🗺️</div>
+            <p className="text-[#f4f4f5]/30 text-[16px] font-light italic mb-2" style={{ fontFamily: "var(--font-playfair)" }}>
+              no stamps yet
+            </p>
+            <p className="text-[#f4f4f5]/20 text-[13px] font-light" style={{ fontFamily: "var(--font-inter)" }}>
+              start your first wander and check in to earn your first neighborhood stamp
+            </p>
+          </div>
+        ) : (
+          passport.map((hood, i) => (
+            <motion.div
+              key={hood.neighborhood}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.07, duration: 0.4 }}
+              className="relative glass border border-[#e5d3b3]/8 rounded-2xl p-5 overflow-hidden"
+            >
+              {/* Diagonal watermark */}
+              <div
+                className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden rounded-2xl"
+                aria-hidden
+              >
+                <span
+                  className="text-[#e5d3b3]/3 font-black text-[72px] tracking-widest uppercase select-none"
+                  style={{
+                    fontFamily: "var(--font-inter)",
+                    transform: "rotate(-20deg)",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  visited
+                </span>
+              </div>
+
+              <div className="relative z-10">
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h3
+                      className="text-[#f4f4f5] text-[18px] font-semibold leading-tight capitalize mb-1"
+                      style={{ fontFamily: "var(--font-playfair)" }}
+                    >
+                      {hood.neighborhood}
+                    </h3>
+                    <p className="text-[#f4f4f5]/30 text-[11px] font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                      last visited {formatDate(hood.lastVisited)}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="px-2.5 py-1 rounded-full bg-[#e5d3b3]/10 border border-[#e5d3b3]/20 text-[#e5d3b3] text-[11px] font-semibold" style={{ fontFamily: "var(--font-inter)" }}>
+                      {hood.count} {hood.count === 1 ? "visit" : "visits"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Stop list */}
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {hood.stops.slice(0, 6).map((stop) => (
+                    <span
+                      key={stop}
+                      className="px-2 py-0.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/50 text-[10px] font-light lowercase"
+                      style={{ fontFamily: "var(--font-inter)" }}
+                    >
+                      📍 {stop}
+                    </span>
+                  ))}
+                  {hood.stops.length > 6 && (
+                    <span className="px-2 py-0.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/30 text-[10px] font-light">
+                      +{hood.stops.length - 6} more
+                    </span>
+                  )}
+                </div>
+
+                {/* Vibe tags */}
+                {hood.vibes.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {hood.vibes.map((v) => (
+                      <span
+                        key={v}
+                        className="px-2 py-0.5 rounded-full bg-[#8ba88e]/8 text-[#8ba88e]/70 text-[9px] font-medium uppercase tracking-wide"
+                        style={{ fontFamily: "var(--font-inter)" }}
+                      >
+                        {v}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          ))
+        )}
+      </div>
+    </motion.div>
+  );
+}
 
 // ── Route Screen ──────────────────────────────────────────────────────────────
 
@@ -730,18 +1239,80 @@ export function RouteScreen({
   onReset,
   isSharedView = false,
   weatherContext,
+  addPassportStamp,
 }: {
   data: WanderV3Response;
   vibe: VibeId | "";
   onReset: () => void;
   isSharedView?: boolean;
   weatherContext?: string | null;
+  addPassportStamp?: (entry: PassportEntry) => void;
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const activeRoute = data.routes[selectedIndex];
-  
+
   const [isSharing, setIsSharing] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
+
+  // ── Calendar Picker ──
+  const [calendarPickerOpen, setCalendarPickerOpen] = useState(false);
+  const [calendarDate, setCalendarDate] = useState("");
+  const [calendarTime, setCalendarTime] = useState("");
+
+  // ── Walk Mode ──
+  const walkWaypoints = (activeRoute?.waypoints ?? []).map((wp) => ({
+    lat: wp.lat,
+    lng: wp.lng,
+    order: wp.order,
+    duration_mins: wp.duration_mins,
+    walk_to_next_mins: wp.walk_to_next_mins,
+  }));
+
+  const handleCheckIn = useCallback(
+    async (idx: number) => {
+      if (!addPassportStamp || !activeRoute) return;
+      const wp = activeRoute.waypoints[idx];
+      if (!wp) return;
+
+      // Try to get neighborhood from address via reverse geocode
+      let neighborhood = wp.address_hint || activeRoute.start_location || "unknown";
+      if (wp.lat && wp.lng) {
+        try {
+          const res = await fetch(`/api/reverse-geocode?lat=${wp.lat}&lng=${wp.lng}`);
+          if (res.ok) {
+            const d = await res.json();
+            if (d.address) neighborhood = d.address;
+          }
+        } catch {
+          // fall back to address_hint
+        }
+      }
+
+      addPassportStamp({
+        neighborhood,
+        stopName: wp.location_name,
+        vibe: vibe || "custom",
+        visitedAt: new Date().toISOString(),
+        lat: wp.lat ?? undefined,
+        lng: wp.lng ?? undefined,
+      });
+    },
+    [activeRoute, vibe, addPassportStamp]
+  );
+
+  const {
+    walkModeActive,
+    proximityStopIdx,
+    checkedInStops,
+    dwellSeconds,
+    currentStopIdx,
+    remainingMinutes,
+    startWalk,
+    stopWalk,
+    manualCheckIn,
+    geoError,
+    stopsWithoutCoords,
+  } = useWalkMode(walkWaypoints, handleCheckIn);
 
   const handleShare = async () => {
     if (!activeRoute) return;
@@ -769,10 +1340,10 @@ export function RouteScreen({
     }
   };
 
-  const handleAddToCalendar = (route: WanderRouteOptionV3) => {
+  const handleAddToCalendar = (route: WanderRouteOptionV3, startDate?: Date) => {
     if (!route) return;
 
-    const eventStart = new Date();
+    const eventStart = startDate ?? new Date();
     const eventEnd = new Date(eventStart.getTime() + route.total_walking_time_mins * 60 * 1000);
 
     const formatIcsDate = (date: Date) => {
@@ -806,7 +1377,7 @@ export function RouteScreen({
     const icsContent = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
-      "PRODID:-//Wander App//Wander Route//EN",
+      "PRODID:-//wander app//wander route//EN",
       "CALSCALE:GREGORIAN",
       "METHOD:PUBLISH",
       "BEGIN:VEVENT",
@@ -933,13 +1504,26 @@ export function RouteScreen({
             transition={{ delay: 0.2, duration: 0.4 }}
             className="flex items-center justify-center gap-2.5 flex-wrap mb-10"
           >
-            <span
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#8ba88e]/10 text-[#8ba88e] text-[11px] font-medium border border-[#8ba88e]/20"
-              style={{ fontFamily: "var(--font-inter)" }}
-            >
-              <Clock className="w-3 h-3" strokeWidth={1.5} />
-              {formatTime(activeRoute.total_walking_time_mins)}
-            </span>
+            {(() => {
+              const walkingMins = activeRoute.initial_walk_mins + activeRoute.waypoints.reduce((sum, wp) => sum + (wp.walk_to_next_mins || 0), 0);
+              const dwellMins = activeRoute.total_walking_time_mins - walkingMins;
+              return (
+                <>
+                  <span
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#8ba88e]/10 text-[#8ba88e] text-[11px] font-medium border border-[#8ba88e]/20"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                  >
+                    🚶 {walkingMins} min walking
+                  </span>
+                  <span
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#e5d3b3]/8 text-[#e5d3b3] text-[11px] font-medium border border-[#e5d3b3]/20"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                  >
+                    ☕ {dwellMins} min at stops
+                  </span>
+                </>
+              );
+            })()}
             <span
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#e5d3b3]/8 text-[#e5d3b3]/60 text-[11px] font-medium border border-[#e5d3b3]/12"
               style={{ fontFamily: "var(--font-inter)" }}
@@ -1036,7 +1620,13 @@ export function RouteScreen({
 
                   {/* Waypoint card */}
                   <div className="ml-10 mb-2">
-                    <WaypointCard waypoint={wp} />
+                    <WaypointCard
+                      waypoint={wp}
+                      isNearby={walkModeActive && proximityStopIdx === i}
+                      isVisited={checkedInStops.has(i)}
+                      dwellSeconds={dwellSeconds.get(i) ?? 0}
+                      onManualCheckIn={walkModeActive && !checkedInStops.has(i) ? () => manualCheckIn(i, handleCheckIn) : undefined}
+                    />
                   </div>
 
                   {/* Walk label to next stop */}
@@ -1092,9 +1682,51 @@ export function RouteScreen({
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.3, duration: 0.5 }}
-            className="mb-10 w-full h-[320px] rounded-2xl overflow-hidden border border-[#f4f4f5]/10 shadow-lg relative bg-[#131316]"
+            className="mb-4 w-full h-[320px] rounded-2xl overflow-hidden border border-[#f4f4f5]/10 shadow-lg relative bg-[#131316]"
           >
             <MapPreview route={activeRoute} />
+          </motion.div>
+        )}
+
+        {/* ── Stop Badges (clickable links for each waypoint) ── */}
+        {!isGenerating && activeRoute && activeRoute.waypoints.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4, duration: 0.4 }}
+            className="mb-8 flex items-center gap-2 flex-wrap justify-center"
+          >
+            {activeRoute.waypoints.map((wp) => {
+              const href = wp.place_id
+                ? `https://www.google.com/maps/place/?q=place_id:${wp.place_id}`
+                : (wp.lat != null && wp.lng != null)
+                ? `https://www.google.com/maps/search/?api=1&query=${wp.lat},${wp.lng}`
+                : null;
+              const badge = (
+                <span
+                  className="w-7 h-7 rounded-full bg-[#8ba88e]/15 border border-[#8ba88e]/30 flex items-center justify-center text-[#8ba88e] text-[11px] font-semibold transition-all duration-200"
+                  style={{ fontFamily: "var(--font-inter)" }}
+                >
+                  {wp.order}
+                </span>
+              );
+              return href ? (
+                <a
+                  key={wp.order}
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={wp.location_name}
+                  className="hover:scale-110 hover:shadow-[0_0_12px_rgba(139,168,142,0.3)] transition-transform"
+                >
+                  {badge}
+                </a>
+              ) : (
+                <span key={wp.order} title={wp.location_name} className="opacity-40">
+                  {badge}
+                </span>
+              );
+            })}
           </motion.div>
         )}
 
@@ -1134,19 +1766,83 @@ export function RouteScreen({
 
               <button
                 id="add-to-calendar-button"
-                onClick={() => handleAddToCalendar(activeRoute)}
+                onClick={() => {
+                  const now = new Date();
+                  const yyyy = now.getFullYear();
+                  const mm = String(now.getMonth() + 1).padStart(2, '0');
+                  const dd = String(now.getDate()).padStart(2, '0');
+                  const totalMins = now.getHours() * 60 + now.getMinutes();
+                  const rounded = Math.round(totalMins / 30) * 30;
+                  const hh = String(Math.floor(rounded / 60) % 24).padStart(2, '0');
+                  const min = String(rounded % 60).padStart(2, '0');
+                  setCalendarDate(`${yyyy}-${mm}-${dd}`);
+                  setCalendarTime(`${hh}:${min}`);
+                  setCalendarPickerOpen(true);
+                }}
                 className="flex items-center gap-2.5 px-6 py-3 rounded-2xl bg-[#e5d3b3]/10 border border-[#e5d3b3]/20 text-[#e5d3b3] text-[13px] font-medium hover:bg-[#e5d3b3]/25 transition-all duration-300"
                 style={{ fontFamily: "var(--font-inter)" }}
               >
                 <Calendar className="w-3.5 h-3.5" />
-                Add to Calendar
+                add to calendar
               </button>
+
+              {/* Calendar picker modal */}
+              <AnimatePresence>
+                {calendarPickerOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.96, y: 8 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.96, y: 8 }}
+                    transition={{ duration: 0.2 }}
+                    className="fixed inset-x-4 bottom-36 z-[60] max-w-[400px] mx-auto glass border border-[#e5d3b3]/20 rounded-2xl p-5 shadow-2xl"
+                  >
+                    <p className="text-[#f4f4f5]/50 text-[11px] font-medium tracking-widest uppercase mb-4" style={{ fontFamily: "var(--font-inter)" }}>when do you want to go?</p>
+                    <div className="flex gap-3 mb-4">
+                      <input
+                        type="date"
+                        value={calendarDate}
+                        onChange={(e) => setCalendarDate(e.target.value)}
+                        className="flex-1 bg-[#f4f4f5]/5 border border-[#f4f4f5]/10 rounded-xl px-3 py-2.5 text-[#f4f4f5] text-[13px] font-light focus:outline-none focus:border-[#e5d3b3]/40"
+                        style={{ fontFamily: "var(--font-inter)" }}
+                      />
+                      <input
+                        type="time"
+                        value={calendarTime}
+                        onChange={(e) => setCalendarTime(e.target.value)}
+                        className="w-28 bg-[#f4f4f5]/5 border border-[#f4f4f5]/10 rounded-xl px-3 py-2.5 text-[#f4f4f5] text-[13px] font-light focus:outline-none focus:border-[#e5d3b3]/40"
+                        style={{ fontFamily: "var(--font-inter)" }}
+                      />
+                    </div>
+                    <div className="flex gap-2.5">
+                      <button
+                        onClick={() => setCalendarPickerOpen(false)}
+                        className="flex-1 py-2.5 rounded-xl border border-[#f4f4f5]/10 text-[#f4f4f5]/40 text-[13px] font-medium hover:border-[#f4f4f5]/20 hover:text-[#f4f4f5]/60 transition-all"
+                        style={{ fontFamily: "var(--font-inter)" }}
+                      >
+                        cancel
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (calendarDate && calendarTime) {
+                            handleAddToCalendar(activeRoute, new Date(`${calendarDate}T${calendarTime}`));
+                          }
+                          setCalendarPickerOpen(false);
+                        }}
+                        className="flex-1 py-2.5 rounded-xl bg-[#e5d3b3]/15 border border-[#e5d3b3]/30 text-[#e5d3b3] text-[13px] font-medium hover:bg-[#e5d3b3]/25 transition-all"
+                        style={{ fontFamily: "var(--font-inter)" }}
+                      >
+                        save to calendar
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </>
           )}
         </motion.div>
       </div>
 
-      {/* ── Sticky Start Wandering Button ── */}
+      {/* ── Sticky Walk Mode + Start Button Bar ── */}
       {!isGenerating && activeRoute && (
         <motion.div
           initial={{ opacity: 0, y: 24 }}
@@ -1158,21 +1854,101 @@ export function RouteScreen({
           }}
         >
           <div className="max-w-[520px] mx-auto">
-            <motion.button
-              id="start-wandering-button"
-              onClick={() => window.open(activeRoute.navigation_deep_link, "_blank")}
-              whileHover={{ scale: 1.015 }}
-              whileTap={{ scale: 0.985 }}
-              transition={{ type: "spring", stiffness: 400, damping: 25 }}
-              className="w-full py-4 rounded-2xl bg-[#8ba88e] text-[#131316] font-semibold text-[15px] tracking-wide flex items-center justify-center gap-3 shadow-[0_0_40px_rgba(139,168,142,0.3)] hover:bg-[#97b59a] transition-colors duration-200"
-              style={{ fontFamily: "var(--font-inter)" }}
-            >
-              <Navigation className="w-4 h-4" strokeWidth={2} />
-              start wandering
-              <ExternalLink className="w-3.5 h-3.5 opacity-60" strokeWidth={2} />
-            </motion.button>
+
+            {/* Walk mode progress bar */}
+            <AnimatePresence>
+              {walkModeActive && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                  animate={{ opacity: 1, height: "auto", marginBottom: 12 }}
+                  exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="glass border border-[#8ba88e]/20 rounded-xl px-4 py-2.5 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <motion.div
+                        className="w-2 h-2 rounded-full bg-[#8ba88e]"
+                        animate={{ opacity: [1, 0.3, 1] }}
+                        transition={{ duration: 1.5, repeat: Infinity }}
+                      />
+                      <span className="text-[#8ba88e] text-[12px] font-medium lowercase" style={{ fontFamily: "var(--font-inter)" }}>
+                        {currentStopIdx >= activeRoute.waypoints.length
+                          ? "all stops checked in! 🎉"
+                          : `stop ${currentStopIdx + 1} of ${activeRoute.waypoints.length}`}
+                      </span>
+                    </div>
+                    <span className="text-[#f4f4f5]/40 text-[11px] font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                      ~{remainingMinutes} min left
+                    </span>
+                  </div>
+                  {geoError && (
+                    <p className="text-red-400/60 text-[11px] text-center mt-1.5 font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                      {geoError}
+                    </p>
+                  )}
+                  {stopsWithoutCoords.length > 0 && (
+                    <p className="text-[#e5d3b3]/50 text-[11px] text-center mt-1.5 font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                      ⚠ stop {stopsWithoutCoords.join(', ')} has no GPS coordinates — tap the card to check in manually
+                    </p>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Button row */}
+            <div className="flex gap-2.5">
+              {/* Live Walk Mode toggle */}
+              {!isSharedView && (
+                <motion.button
+                  id="live-walk-mode-button"
+                  onClick={walkModeActive ? stopWalk : startWalk}
+                  whileHover={{ scale: 1.015 }}
+                  whileTap={{ scale: 0.985 }}
+                  transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                  className={`shrink-0 py-4 px-4 rounded-2xl font-medium text-[13px] tracking-wide flex items-center justify-center gap-2 transition-all duration-300 ${
+                    walkModeActive
+                      ? "bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500/25"
+                      : "bg-[#8ba88e]/10 border border-[#8ba88e]/25 text-[#8ba88e] hover:bg-[#8ba88e]/20"
+                  }`}
+                  style={{ fontFamily: "var(--font-inter)" }}
+                  title={walkModeActive ? "end walk" : "live walk mode"}
+                >
+                  {walkModeActive ? (
+                    <>
+                      <motion.div
+                        className="w-3 h-3 rounded-full bg-red-400"
+                        animate={{ opacity: [1, 0.3, 1] }}
+                        transition={{ duration: 1.2, repeat: Infinity }}
+                      />
+                      end
+                    </>
+                  ) : (
+                    <>
+                      <Radio className="w-4 h-4" strokeWidth={1.5} />
+                      live
+                    </>
+                  )}
+                </motion.button>
+              )}
+
+              {/* Main CTA */}
+              <motion.button
+                id="start-wandering-button"
+                onClick={() => window.open(activeRoute.navigation_deep_link, "_blank")}
+                whileHover={{ scale: 1.015 }}
+                whileTap={{ scale: 0.985 }}
+                transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                className="flex-1 py-4 rounded-2xl bg-[#8ba88e] text-[#131316] font-semibold text-[15px] tracking-wide flex items-center justify-center gap-3 shadow-[0_0_40px_rgba(139,168,142,0.3)] hover:bg-[#97b59a] transition-colors duration-200"
+                style={{ fontFamily: "var(--font-inter)" }}
+              >
+                <Navigation className="w-4 h-4" strokeWidth={2} />
+                start wandering
+                <ExternalLink className="w-3.5 h-3.5 opacity-60" strokeWidth={2} />
+              </motion.button>
+            </div>
+
             <p className="text-center text-[#f4f4f5]/20 text-[11px] mt-2 font-light" style={{ fontFamily: "var(--font-inter)" }}>
-              opens walking directions in google maps
+              {walkModeActive ? "gps active — your stops will glow when you're close" : "opens walking directions in google maps"}
             </p>
           </div>
         </motion.div>
@@ -1198,6 +1974,17 @@ export default function Home() {
   const [weatherContext, setWeatherContext] = useState<string | null>(null);
   const [numStops, setNumStops] = useState<number>(3);
   const [freeOnly, setFreeOnly] = useState<boolean>(false);
+  const [advisorData, setAdvisorData] = useState<AdvisorResponse | null>(null);
+  const [advisorLoading, setAdvisorLoading] = useState<boolean>(false);
+  const [presets, setPresets] = useState<PresetOption[]>([]);
+  const [presetsLoading, setPresetsLoading] = useState<boolean>(false);
+  const [presetsRefreshing, setPresetsRefreshing] = useState<boolean>(false);
+  const [selectedPresetIdx, setSelectedPresetIdx] = useState<number | null>(null);
+  const [companion, setCompanion] = useState<string>("solo");
+
+  // ── Passport ──
+  const { passport, passportCount, totalStops, addStamp, clearPassport } = usePassport();
+  const [passportOpen, setPassportOpen] = useState(false);
 
   useEffect(() => {
     // 1. Register service worker
@@ -1215,6 +2002,117 @@ export default function Home() {
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
     return () => window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
   }, []);
+
+  const [hasManuallySetStops, setHasManuallySetStops] = useState<boolean>(false);
+
+  // Advisor fetch — only re-runs when locations or companion change.
+  // Slider changes (timeBudget, numStops) are evaluated client-side below.
+  useEffect(() => {
+    if (!start.trim() || !end.trim()) {
+      setAdvisorData(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setAdvisorLoading(true);
+      try {
+        const localTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const localDay = new Date().toLocaleDateString([], { weekday: 'long' });
+        const timeContext = `${localDay}, ${localTime}`;
+
+        const res = await fetch("/api/pacing-advisor", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            start_location: start,
+            end_location: end,
+            time_budget_minutes: timeBudget,
+            num_stops: numStops,
+            companion: companion,
+            local_time: timeContext,
+          }),
+        });
+        if (res.ok) {
+          const data: AdvisorResponse = await res.json();
+          setAdvisorData(data);
+
+          if (!hasManuallySetStops && data.recommended_stops >= 2 && data.recommended_stops <= 5) {
+            setNumStops(data.recommended_stops);
+          }
+        }
+      } catch (err) {
+        console.error("error calling pacing advisor:", err);
+      } finally {
+        setAdvisorLoading(false);
+      }
+    }, 900);
+
+    return () => clearTimeout(timer);
+  // Companion is intentionally excluded: changing companion (e.g. via preset click)
+  // should NOT re-run the distance/feasibility check. Companion is still sent in
+  // the request body via the closure — it just won't act as a trigger.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [start, end]);
+
+  // Client-side feasibility overlay — instantly reflects slider changes
+  // without hitting the API. Overrides the card's status text only.
+  const clientFeasibility = (() => {
+    if (!advisorData) return null;
+    const minRequired = numStops * 12;
+    if (timeBudget < minRequired) {
+      return {
+        status: "impossible" as const,
+        message: `impossible: ${timeBudget}m is too short for ${numStops} stops — try fewer stops or more time`,
+      };
+    }
+    if (timeBudget < numStops * 18) {
+      return {
+        status: "tight" as const,
+        message: `tight: ${numStops} stops in ${timeBudget}m is doable but you'll need to keep moving`,
+      };
+    }
+    return null; // use server message
+  })();
+
+  const fetchPresets = useCallback(async (isRefresh = false) => {
+    if (!start.trim()) {
+      setPresets([]);
+      return;
+    }
+    setPresetsLoading(true);
+    try {
+      const localTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const localDay = new Date().toLocaleDateString([], { weekday: 'long' });
+      const timeContext = `${localDay}, ${localTime}`;
+
+      const res = await fetch("/api/suggest-vibe-preset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start_location: start,
+          local_time: timeContext,
+          refresh: isRefresh,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPresets(data.presets || []);
+      }
+    } catch (err) {
+      console.error("error fetching presets:", err);
+    } finally {
+      setPresetsLoading(false);
+    }
+  }, [start]);
+
+  useEffect(() => {
+    if (!start.trim()) {
+      setPresets([]);
+      return;
+    }
+    const timer = setTimeout(() => fetchPresets(false), 1000);
+    return () => clearTimeout(timer);
+  }, [start, fetchPresets]);
 
   useEffect(() => {
     if (screen !== "loading") return;
@@ -1250,7 +2148,8 @@ export default function Home() {
           vibe: selectedVibe,
           local_time: timeContext,
           num_stops: numStops,
-          free_only: freeOnly
+          free_only: freeOnly,
+          companion: companion
         }),
       });
 
@@ -1315,7 +2214,7 @@ export default function Home() {
       setError(err instanceof Error ? err.message : "Something went wrong");
       setScreen("input");
     }
-  }, [start, end, timeBudget, vibe, customVibe]);
+  }, [start, end, timeBudget, vibe, customVibe, numStops, freeOnly, companion]);
 
   const handleReset = useCallback(() => {
     setRouteData(null);
@@ -1332,7 +2231,7 @@ export default function Home() {
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         try {
-          const res = await fetch(`http://127.0.0.1:8000/api/reverse-geocode?lat=${position.coords.latitude}&lng=${position.coords.longitude}`);
+          const res = await fetch(`/api/reverse-geocode?lat=${position.coords.latitude}&lng=${position.coords.longitude}`);
           const data = await res.json();
           if (data.address) {
             setStart(data.address);
@@ -1371,6 +2270,24 @@ export default function Home() {
             setNumStops={setNumStops}
             freeOnly={freeOnly}
             setFreeOnly={setFreeOnly}
+            advisorData={advisorData}
+            advisorLoading={advisorLoading}
+            clientFeasibility={clientFeasibility}
+            presets={presets}
+            presetsLoading={presetsLoading}
+            presetsRefreshing={presetsRefreshing}
+            onRefreshPresets={async () => {
+              setPresetsRefreshing(true);
+              await fetchPresets(true);
+              setPresetsRefreshing(false);
+            }}
+            selectedPresetIdx={selectedPresetIdx}
+            setSelectedPresetIdx={setSelectedPresetIdx}
+            companion={companion}
+            setCompanion={setCompanion}
+            setHasManuallySetStops={setHasManuallySetStops}
+            passportCount={passportCount}
+            onOpenPassport={() => setPassportOpen(true)}
           />
         )}
         {screen === "loading" && (
@@ -1383,6 +2300,19 @@ export default function Home() {
             vibe={vibe}
             onReset={handleReset}
             weatherContext={weatherContext}
+            addPassportStamp={addStamp}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Passport Overlay (global, above all screens) ── */}
+      <AnimatePresence>
+        {passportOpen && (
+          <PassportOverlay
+            passport={passport}
+            totalStops={totalStops}
+            onClose={() => setPassportOpen(false)}
+            onClear={() => { clearPassport(); setPassportOpen(false); }}
           />
         )}
       </AnimatePresence>
