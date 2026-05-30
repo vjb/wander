@@ -26,9 +26,10 @@ import {
   Radio,
   X,
   Trash2,
+  Lock,
 } from "lucide-react";
 
-import { MapPreview } from "./components/MapPreview";
+import { WanderMap } from "./components/WanderMap";
 import { RotatingTagline } from "./components/RotatingTagline";
 import { useWalkMode } from "./hooks/useWalkMode";
 import { usePassport, type PassportEntry } from "./hooks/usePassport";
@@ -216,6 +217,8 @@ function InputScreen({
   setHasManuallySetStops,
   passportCount,
   onOpenPassport,
+  isRoundTrip, setIsRoundTrip,
+  comfortMode, setComfortMode,
 }: {
   start: string; setStart: (v: string) => void;
   end: string; setEnd: (v: string) => void;
@@ -243,8 +246,13 @@ function InputScreen({
   setHasManuallySetStops: (v: boolean) => void;
   passportCount: number;
   onOpenPassport: () => void;
+  isRoundTrip: boolean;
+  setIsRoundTrip: (v: boolean) => void;
+  comfortMode: boolean;
+  setComfortMode: (v: boolean) => void;
 }) {
-  const canWander = start.trim().length > 0 && end.trim().length > 0 && (vibe !== "" || customVibe.trim().length > 0);
+  const effectiveEnd = isRoundTrip ? start : end;
+  const canWander = start.trim().length > 0 && effectiveEnd.trim().length > 0 && (vibe !== "" || customVibe.trim().length > 0);
 
   const formatTime = (mins: number) => {
     if (mins < 60) return `${mins} min`;
@@ -267,7 +275,7 @@ function InputScreen({
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.05, duration: 0.6 }}
-        className="text-center mb-14"
+        className="text-center mb-12"
       >
         <div className="flex items-center justify-center gap-2.5 mb-5 flex-wrap">
           <Navigation className="w-4 h-4 text-[#8ba88e]" strokeWidth={1.5} />
@@ -277,21 +285,34 @@ function InputScreen({
           {passportCount > 0 && (
             <button
               onClick={onOpenPassport}
-              className="ml-1 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#e5d3b3]/10 border border-[#e5d3b3]/25 text-[#e5d3b3]/70 text-[10px] font-medium tracking-wide hover:bg-[#e5d3b3]/20 hover:text-[#e5d3b3] transition-all duration-200"
+              className="ml-1 flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#e5d3b3]/10 border border-[#e5d3b3]/25 text-[#e5d3b3]/70 text-[11px] font-medium tracking-wide hover:bg-[#e5d3b3]/20 hover:text-[#e5d3b3] transition-all duration-200"
               style={{ fontFamily: "var(--font-inter)" }}
               title="Open your neighborhood passport"
             >
-              <BookOpen className="w-3 h-3" strokeWidth={1.5} />
+              <BookOpen className="w-3.5 h-3.5" strokeWidth={1.5} />
               {passportCount} {passportCount === 1 ? "neighborhood" : "neighborhoods"}
             </button>
           )}
+          {/* ── Comfort mode toggle ── */}
+          <button
+            onClick={() => setComfortMode(!comfortMode)}
+            className={`ml-1 flex items-center gap-1.5 px-3 py-1 rounded-full border text-[11px] font-semibold tracking-wide transition-all duration-200 ${
+              comfortMode
+                ? "bg-[#8ba88e]/20 border-[#8ba88e]/50 text-[#8ba88e]"
+                : "bg-transparent border-[#f4f4f5]/15 text-[#f4f4f5]/35 hover:text-[#f4f4f5]/60 hover:border-[#f4f4f5]/25"
+            }`}
+            style={{ fontFamily: "var(--font-inter)" }}
+            title={comfortMode ? "Comfort mode on — tap to reduce" : "Larger text & icons"}
+          >
+            Aa
+          </button>
           {deferredPrompt && (
             <button
               onClick={async () => {
                 deferredPrompt.prompt();
                 await deferredPrompt.userChoice;
               }}
-              className="ml-2 px-2.5 py-0.5 rounded-full bg-[#8ba88e]/15 border border-[#8ba88e]/30 text-[#8ba88e] text-[10px] font-semibold tracking-wide uppercase hover:bg-[#8ba88e]/25 transition-all duration-200"
+              className="ml-2 px-2.5 py-1 rounded-full bg-[#8ba88e]/15 border border-[#8ba88e]/30 text-[#8ba88e] text-[11px] font-semibold tracking-wide uppercase hover:bg-[#8ba88e]/25 transition-all duration-200"
               style={{ fontFamily: "var(--font-inter)" }}
             >
               install app
@@ -310,16 +331,16 @@ function InputScreen({
       >
         <div className="glass rounded-3xl p-7 shadow-2xl">
           {/* Locations */}
-          <div className="mb-7 space-y-1">
-            <div className="flex items-center gap-3.5 py-3.5 px-1 border-b border-[#f4f4f5]/6 focus-within:border-[#8ba88e]/40 transition-colors duration-300">
-              <MapPin className="w-4 h-4 text-[#8ba88e] shrink-0" strokeWidth={1.5} />
+          <div className="mb-7">
+            <div className="flex items-center gap-3.5 py-4 px-1 border-b border-[#f4f4f5]/6 focus-within:border-[#8ba88e]/40 transition-colors duration-300">
+              <MapPin className={`${comfortMode ? 'w-5 h-5' : 'w-4 h-4'} text-[#8ba88e] shrink-0 transition-all`} strokeWidth={1.5} />
               <input
                 id="start-location"
                 type="text"
                 placeholder="Starting from…"
                 value={start}
                 onChange={(e) => setStart(e.target.value)}
-                className="flex-1 bg-transparent text-[#f4f4f5] placeholder-[#f4f4f5]/20 text-[15px] font-light tracking-wide focus:outline-none min-w-0"
+                className={`flex-1 bg-transparent text-[#f4f4f5] placeholder-[#f4f4f5]/25 font-light tracking-wide focus:outline-none min-w-0 transition-all ${comfortMode ? 'text-[17px]' : 'text-[15px]'}`}
                 style={{ fontFamily: "var(--font-inter)" }}
               />
               <button 
@@ -328,32 +349,48 @@ function InputScreen({
                 title="Use my current location"
                 disabled={isLocating}
               >
-                {isLocating ? <Loader2 className="w-4 h-4 animate-spin" /> : <LocateFixed className="w-4 h-4" strokeWidth={1.5} />}
+                {isLocating ? <Loader2 className={`${comfortMode ? 'w-5 h-5' : 'w-4 h-4'} animate-spin`} /> : <LocateFixed className={`${comfortMode ? 'w-5 h-5' : 'w-4 h-4'}`} strokeWidth={1.5} />}
               </button>
             </div>
-            <div className="flex items-center pl-[7px] py-1 gap-3.5 relative">
-              <div className="w-2 h-2 rounded-full border border-[#f4f4f5]/15 shrink-0" />
-              <div className="h-px flex-1 border-t border-dashed border-[#f4f4f5]/6" />
+
+            {/* Round-trip pill + connector */}
+            <div className="flex items-center gap-3 py-2 px-1">
+              <div className="w-px h-8 bg-[#f4f4f5]/8 ml-[8px] shrink-0" />
               <button
                 type="button"
-                onClick={() => setEnd(start)}
-                className="absolute right-1 p-1.5 hover:bg-[#8ba88e]/10 text-xs rounded-full border border-[#f4f4f5]/10 bg-[#131316] text-[#8ba88e] transition-colors flex items-center justify-center"
-                title="Round trip (loop back to start)"
+                id="round-trip-toggle"
+                onClick={() => setIsRoundTrip(!isRoundTrip)}
+                className={`flex items-center gap-2 px-4 py-1.5 rounded-full border text-[12px] font-medium tracking-wide transition-all duration-250 ${
+                  isRoundTrip
+                    ? "bg-[#8ba88e]/18 border-[#8ba88e]/50 text-[#8ba88e] shadow-[0_0_14px_rgba(139,168,142,0.12)]"
+                    : "bg-transparent border-[#f4f4f5]/12 text-[#f4f4f5]/35 hover:text-[#f4f4f5]/55 hover:border-[#f4f4f5]/25"
+                }`}
+                style={{ fontFamily: "var(--font-inter)" }}
               >
-                🔁
+                <span>{isRoundTrip ? "↩" : "↩"}</span>
+                {isRoundTrip ? "looping back to start" : "make it a loop"}
               </button>
             </div>
-            <div className="flex items-center gap-3.5 py-3.5 px-1 border-b border-transparent focus-within:border-[#e5d3b3]/40 transition-colors duration-300">
-              <MapPin className="w-4 h-4 text-[#e5d3b3] shrink-0" strokeWidth={1.5} />
+
+            <div className="flex items-center gap-3.5 py-4 px-1 border-b border-transparent focus-within:border-[#e5d3b3]/40 transition-colors duration-300">
+              <MapPin className={`${comfortMode ? 'w-5 h-5' : 'w-4 h-4'} ${isRoundTrip ? 'text-[#8ba88e]/60' : 'text-[#e5d3b3]'} shrink-0 transition-all`} strokeWidth={1.5} />
               <input
                 id="end-location"
                 type="text"
-                placeholder="Ending up at…"
-                value={end}
-                onChange={(e) => setEnd(e.target.value)}
-                className="flex-1 bg-transparent text-[#f4f4f5] placeholder-[#f4f4f5]/20 text-[15px] font-light tracking-wide focus:outline-none"
+                placeholder={isRoundTrip ? "back to start" : "Ending up at…"}
+                value={isRoundTrip ? start : end}
+                onChange={(e) => { if (!isRoundTrip) setEnd(e.target.value); }}
+                readOnly={isRoundTrip}
+                className={`flex-1 bg-transparent placeholder-[#f4f4f5]/25 font-light tracking-wide focus:outline-none transition-all ${
+                  comfortMode ? 'text-[17px]' : 'text-[15px]'
+                } ${
+                  isRoundTrip ? 'text-[#f4f4f5]/35 cursor-default' : 'text-[#f4f4f5]'
+                }`}
                 style={{ fontFamily: "var(--font-inter)" }}
               />
+              {isRoundTrip && (
+                <Lock className="w-3.5 h-3.5 text-[#8ba88e]/40 shrink-0" strokeWidth={1.5} />
+              )}
             </div>
           </div>
 
@@ -1692,9 +1729,9 @@ export function RouteScreen({
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.3, duration: 0.5 }}
-            className="mb-4 w-full h-[320px] rounded-2xl overflow-hidden border border-[#f4f4f5]/10 shadow-lg relative bg-[#131316]"
+            className="mb-6 w-full h-[360px] rounded-2xl overflow-hidden border border-[#8ba88e]/15 shadow-[0_0_40px_rgba(139,168,142,0.08)] relative bg-[#131316]"
           >
-            <MapPreview route={activeRoute} />
+            <WanderMap route={activeRoute} />
           </motion.div>
         )}
 
@@ -1991,6 +2028,13 @@ export default function Home() {
   const [presetsRefreshing, setPresetsRefreshing] = useState<boolean>(false);
   const [selectedPresetIdx, setSelectedPresetIdx] = useState<number | null>(null);
   const [companion, setCompanion] = useState<string>("solo");
+  const [isRoundTrip, setIsRoundTrip] = useState(false);
+  const [comfortMode, setComfortMode] = useState(false);
+
+  // Keep end in sync when round-trip is active and start changes
+  useEffect(() => {
+    if (isRoundTrip) setEnd(start);
+  }, [isRoundTrip, start]);
 
   // ── Passport ──
   const { passport, passportCount, totalStops, addStamp, clearPassport } = usePassport();
@@ -2298,6 +2342,10 @@ export default function Home() {
             setHasManuallySetStops={setHasManuallySetStops}
             passportCount={passportCount}
             onOpenPassport={() => setPassportOpen(true)}
+            isRoundTrip={isRoundTrip}
+            setIsRoundTrip={setIsRoundTrip}
+            comfortMode={comfortMode}
+            setComfortMode={setComfortMode}
           />
         )}
         {screen === "loading" && (
