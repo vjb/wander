@@ -324,6 +324,11 @@ def _call_openai_rag(request: RouteRequest, venues: List[Dict]) -> V3ResponseLLM
     ]
     venues_context = "\n".join(venue_lines)
 
+    # Compute per-stop guidance so LLM fills the time budget properly
+    _stops = 3  # typical stops per route
+    _walk_allowance = 25  # rough total walking minutes
+    _per_stop_mins = max(15, (request.time_budget_minutes - _walk_allowance) // _stops)
+
     system_prompt = f"""You are Wander — an urban experience curator with encyclopedic local knowledge.
 Your life isn't a chore; wander. Help the user feel that.
 
@@ -333,11 +338,17 @@ VERIFIED VENUES (sourced from Google Places — these are real, confirmed busine
 MISSION: Build exactly 3 distinct walking routes from {request.start_location} to {request.end_location}.
 Each route uses 3–4 stops chosen ONLY from the numbered list above.
 
+TIME BUDGET: {request.time_budget_minutes} minutes TOTAL per route.
+→ TARGET: Each route should USE approximately {request.time_budget_minutes} minutes — not just fit within it.
+→ Each stop should have duration_mins of approximately {_per_stop_mins} minutes (scale up for longer budgets).
+→ If the budget is 60 min: stops of ~12–15 min each. If 120 min: ~25–30 min. If 240 min: ~50–60 min each.
+→ DO NOT generate short 45-minute routes when given a 4-hour budget. Fill the time richly.
+
 STRICT RULES:
 1. Use ONLY venues from the list. Reference each by its [number] in venue_index. No invented stops.
 2. Each route must use a DIFFERENT set of venues. No shared stops between routes.
 3. Stops must flow geographically toward {request.end_location}. Zero backtracking.
-4. Total time per route must fit within {request.time_budget_minutes} minutes.
+4. Hard cap: total time (duration_mins + walk_to_next_mins for all stops) ≤ {request.time_budget_minutes} min.
 5. The 3 routes must be: Route 1 = ultra-scenic/relaxed, Route 2 = culturally dense, Route 3 = fast & focused.
 6. Write like a local who has lived here 10 years. Specific, warm. Never say "charming" or "vibrant."
 7. Insider tips must be genuinely useful and specific to this exact venue.
@@ -367,11 +378,20 @@ Active vibe: {request.vibe}"""
 @traceable(name="wander_v3_fallback", run_type="llm")  # type: ignore
 def _call_openai_fallback(request: RouteRequest) -> V3ResponseLLM:
     """Fallback when Google Places returns no results — GPT-4o generates from knowledge."""
+    _stops = 3
+    _walk_allowance = 25
+    _per_stop_mins = max(15, (request.time_budget_minutes - _walk_allowance) // _stops)
+
     system_prompt = f"""You are Wander. Generate exactly 3 distinct walking routes.
 Your life isn't a chore; wander.
 
 Each waypoint MUST have a venue_index (use 1, 2, 3 ... sequentially across all routes).
 Set venue_index = order number of the stop globally across all routes.
+
+TIME BUDGET: {request.time_budget_minutes} minutes TOTAL per route.
+→ TARGET: Each route should USE approximately {request.time_budget_minutes} minutes.
+→ Per stop: approximately {_per_stop_mins} minutes duration_mins each.
+→ DO NOT generate short routes when given a large time budget. Fill the time.
 
 RULES:
 1. REAL PLACES ONLY. Every stop must genuinely exist with a real street address in address_hint.
@@ -379,7 +399,7 @@ RULES:
 2. Stops flow geographically from origin to destination. No backtracking.
 3. Routes: Route 1 = ultra-scenic, Route 2 = culturally dense, Route 3 = fast & focused.
 4. No shared stops between routes.
-5. Total time per route ≤ {request.time_budget_minutes} minutes.
+5. Hard cap: total (duration_mins + walk_to_next_mins) per route ≤ {request.time_budget_minutes} minutes.
 
 Vibe: {request.vibe}"""
 
