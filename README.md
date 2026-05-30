@@ -10,7 +10,13 @@ An AI-powered urban itinerary generator that turns any two addresses into three 
 
 ## What It Does
 
-![Wander App Walkthrough](assets/app-walkthrough.png)
+<div align="center">
+  <img src="assets/01-landing.png" width="800" alt="Wander Landing Screen" />
+  <br/><br/>
+  <img src="assets/02-form-filled.png" width="800" alt="Wander Input Form" />
+  <br/><br/>
+  <img src="assets/04-route.png" width="800" alt="Wander Generated Route" />
+</div>
 
 You give Wander a starting point, a destination, a time budget, and a vibe. It fires a radar sweep across Google Places, pulls real, verified venues near your corridor, and hands that context to GPT-4o. The model curates — never invents — three uniquely themed routes from the real-world data. Every walking time is validated by Google Directions. Every stop has a live Google rating. One tap hands the whole thing off to Google Maps for turn-by-turn GPS navigation.
 
