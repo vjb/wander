@@ -137,6 +137,8 @@ class RouteRequest(BaseModel):
     time_budget_minutes: int
     vibe: str
     local_time: Optional[str] = None
+    num_stops: Optional[int] = 3
+    free_only: Optional[bool] = False
 
 
 class ShareRequest(BaseModel):
@@ -176,9 +178,9 @@ class RouteOptionLLM(BaseModel):
     )
     waypoints: List[SelectedWaypointLLM] = Field(
         ...,
-        min_length=3,
-        max_length=4,
-        description="3–4 stops selected from the verified venue list, in geographic order",
+        min_length=2,
+        max_length=5,
+        description="2–5 stops selected from the verified venue list, in geographic order",
     )
 
 
@@ -335,7 +337,7 @@ async def _places_search_text(query: str, lat: float, lng: float, radius_m: floa
                     "X-Goog-Api-Key": GOOGLE_KEY,
                     "X-Goog-FieldMask": (
                         "places.id,places.displayName,places.formattedAddress,"
-                        "places.rating,places.types,places.location,places.photos"
+                        "places.rating,places.types,places.location,places.photos,places.priceLevel"
                     ),
                 },
             )
@@ -361,6 +363,7 @@ async def _places_search_text(query: str, lat: float, lng: float, radius_m: floa
                         "lat": p.get("location", {}).get("latitude"),
                         "lng": p.get("location", {}).get("longitude"),
                         "photo_url": photo_url,
+                        "price_level": p.get("priceLevel"),
                     }
                 )
             return places
@@ -492,7 +495,7 @@ def _call_openai_single_route_sync(
     venues_context = "\n".join(venue_lines)
 
     # Per-stop duration: budget minus realistic walking time (12 min per leg × n_stops legs)
-    _stops = 3
+    _stops = request.num_stops if request.num_stops else 3
     _walk_per_leg_mins = 12  # realistic city block walking between nearby stops
     _walk_allowance = _walk_per_leg_mins * _stops
     _per_stop_mins = max(15, (request.time_budget_minutes - _walk_allowance) // _stops)
@@ -529,6 +532,16 @@ def _call_openai_single_route_sync(
             f"EXCLUDED VENUES: Do NOT use any of these venues as they have been used in previous routes: {', '.join(previously_selected)}.\n"
         )
 
+    free_prompt_chunk = ""
+    if request.free_only:
+        free_prompt_chunk = (
+            "IMPORTANT: The user requested FREE stops only. You MUST prioritize public parks, "
+            "free museums, public libraries, landmarks, open plazas, or public sights. "
+            "Do NOT select any commercial restaurants, bars, cafes, or retail stores unless "
+            "the stop is strictly for a free activity (e.g. browsing a public space) "
+            "and specify that it does not require a purchase.\n"
+        )
+
     system_prompt = f"""You are Wander — an urban experience curator with encyclopedic local knowledge.
 Your life isn't a chore; wander. Help the user feel that.
 
@@ -536,7 +549,7 @@ VERIFIED VENUES (sourced from Google Places — these are real, confirmed busine
 {venues_context}
 
 MISSION: Build exactly ONE walking route from {request.start_location} to {request.end_location} matching this theme: {route_type_desc}.
-The route must use 3–4 stops chosen ONLY from the numbered list above.
+The route must use exactly {_stops} stops chosen ONLY from the numbered list above.
 
 TIME BUDGET: {request.time_budget_minutes} minutes TOTAL.
 → TARGET: The route should USE approximately {request.time_budget_minutes} minutes.
@@ -545,6 +558,7 @@ TIME BUDGET: {request.time_budget_minutes} minutes TOTAL.
 {weather_prompt_chunk}
 {time_prompt_chunk}
 {exclude_prompt_chunk}
+{free_prompt_chunk}
 
 STRICT RULES:
 1. Use ONLY venues from the list. Reference each by its [number] in venue_index. No invented stops.
@@ -556,6 +570,19 @@ STRICT RULES:
 7. Accessibility: If the user requests wheelchair accessibility or 'no stairs', you must explicitly select venues that are accessible and plan routes that avoid known steep inclines or stairways based on your geographic knowledge.
 
 Active vibe / custom request: {request.vibe}"""
+
+    class DynamicRouteOptionLLM(BaseModel):
+        route_name: str = Field(..., description="Creative 3–5 word route name e.g. 'The Slow Burn Drift'")
+        theme_summary: str = Field(
+            ...,
+            description="One sentence distinguishing this route's character from the other two",
+        )
+        waypoints: List[SelectedWaypointLLM] = Field(
+            ...,
+            min_length=_stops,
+            max_length=_stops,
+            description=f"Exactly {_stops} stops selected from the verified venue list, in geographic order",
+        )
 
     response = openai_client.beta.chat.completions.parse(
         model="gpt-4o",
@@ -569,7 +596,7 @@ Active vibe / custom request: {request.vibe}"""
                 ),
             },
         ],
-        response_format=RouteOptionLLM,
+        response_format=DynamicRouteOptionLLM,
         temperature=0.35,
     )
     return response.choices[0].message.parsed
@@ -593,7 +620,7 @@ async def _enrich_route(
         idx = wp.venue_index - 1
         venue = venues[idx] if (0 <= idx < len(venues)) else None
 
-        name     = venue["name"]      if venue else f"Stop {i + 1}"
+        name     = venue["name"].lower().rstrip('.') if venue else f"stop {i + 1}"
         address  = venue["address"]   if venue else request.start_location
         rating   = venue.get("rating")    if venue else None
         photo_url = venue.get("photo_url") if venue else None
@@ -612,11 +639,11 @@ async def _enrich_route(
                 place_id=place_id,
                 lat=lat,
                 lng=lng,
-                action_description=wp.action_description,
+                action_description=wp.action_description.lower().rstrip('.'),
                 duration_mins=wp.duration_mins,
                 walk_to_next_mins=0,  # filled below
-                vibe_tag=wp.vibe_tag,
-                insider_tip=wp.insider_tip,
+                vibe_tag=wp.vibe_tag.lower().rstrip('.'),
+                insider_tip=wp.insider_tip.lower().rstrip('.'),
             )
         )
 
@@ -647,8 +674,8 @@ async def _enrich_route(
     total_time = sum(w.duration_mins + w.walk_to_next_mins for w in waypoints) + initial_walk_mins
 
     return WanderRouteOptionV3(
-        route_name=raw_route.route_name,
-        theme_summary=raw_route.theme_summary,
+        route_name=raw_route.route_name.lower().rstrip('.'),
+        theme_summary=raw_route.theme_summary.lower().rstrip('.'),
         total_walking_time_mins=total_time,
         initial_walk_mins=initial_walk_mins,
         start_location=request.start_location,
@@ -818,9 +845,15 @@ async def generate_route(request: RouteRequest):
                             
                             place["progression"] = max(0.0, min(1.0, progression))
                             venues.append(place)
+            if request.free_only:
+                venues = [
+                    v for v in venues
+                    if v.get("price_level") not in ["PRICE_LEVEL_MODERATE", "PRICE_LEVEL_EXPENSIVE", "PRICE_LEVEL_VERY_EXPENSIVE"]
+                ]
             
             # Raise an explicit exception if we cannot construct a valid RAG route
-            if len(venues) < 3:
+            req_stops = request.num_stops if request.num_stops else 3
+            if len(venues) < req_stops:
                 raise Exception("We couldn't find enough verified venues matching this vibe in this exact area. Try expanding your search or changing the vibe.")
 
             # Sort by rating and keep top 25 candidates to provide a rich spatial spread

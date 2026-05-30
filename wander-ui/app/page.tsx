@@ -19,9 +19,12 @@ import {
   Loader2,
   Share,
   Calendar,
+  Sliders,
+  Sparkles,
 } from "lucide-react";
 
 import { MapPreview } from "./components/MapPreview";
+import { RotatingTagline } from "./components/RotatingTagline";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -174,6 +177,8 @@ function InputScreen({
   handleLocate, isLocating,
   customVibe, setCustomVibe,
   deferredPrompt,
+  numStops, setNumStops,
+  freeOnly, setFreeOnly,
 }: {
   start: string; setStart: (v: string) => void;
   end: string; setEnd: (v: string) => void;
@@ -185,6 +190,8 @@ function InputScreen({
   isLocating: boolean;
   customVibe: string; setCustomVibe: (v: string) => void;
   deferredPrompt: any;
+  numStops: number; setNumStops: (v: number) => void;
+  freeOnly: boolean; setFreeOnly: (v: boolean) => void;
 }) {
   const canWander = start.trim().length > 0 && end.trim().length > 0 && (vibe !== "" || customVibe.trim().length > 0);
 
@@ -229,14 +236,7 @@ function InputScreen({
             </button>
           )}
         </div>
-        <h1 className="text-[2.8rem] md:text-[4.5rem] leading-[1.05] font-semibold text-[#f4f4f5] mb-5" style={{ fontFamily: "var(--font-playfair)" }}>
-          any city has<br />
-          <em className="text-[#8ba88e]">secrets</em> to share.
-        </h1>
-        <p className="text-[#f4f4f5]/35 text-base font-light tracking-wide max-w-sm mx-auto" style={{ fontFamily: "var(--font-inter)" }}>
-          tell us where you&apos;re starting, where you need to end up, and how you feel today.
-          we&apos;ll generate three distinct routes to wander them.
-        </p>
+        <RotatingTagline />
       </motion.header>
 
       {/* Form Card */}
@@ -374,6 +374,63 @@ function InputScreen({
                 }`}
                 style={{ fontFamily: "var(--font-inter)" }}
               />
+            </div>
+          </div>
+
+          {/* Customization Options */}
+          <div className="mb-8 border-t border-[#f4f4f5]/6 pt-6">
+            <p className="flex items-center gap-2 text-[#f4f4f5]/40 text-[12px] font-medium tracking-widest uppercase mb-4.5" style={{ fontFamily: "var(--font-inter)" }}>
+              <Sliders className="w-3.5 h-3.5 text-[#8ba88e]" strokeWidth={1.5} />
+              custom options
+            </p>
+            
+            {/* Number of Stops */}
+            <div className="mb-5">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[#f4f4f5]/60 text-xs font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                  Number of stops
+                </span>
+                <span className="text-[#e5d3b3] text-xs font-medium" style={{ fontFamily: "var(--font-inter)" }}>
+                  {numStops} {numStops === 1 ? 'stop' : 'stops'}
+                </span>
+              </div>
+              <input
+                id="num-stops"
+                type="range"
+                min={2}
+                max={5}
+                step={1}
+                value={numStops}
+                onChange={(e) => setNumStops(Number(e.target.value))}
+              />
+              <div className="flex justify-between text-[#f4f4f5]/25 text-[10px] mt-1 font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                <span>2 stops</span><span>3 stops</span><span>4 stops</span><span>5 stops</span>
+              </div>
+            </div>
+
+            {/* Price Filter & Free Stops */}
+            <div className="flex items-center justify-between border-t border-[#f4f4f5]/6 pt-4 mt-4">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-3.5 h-3.5 text-[#e5d3b3]" strokeWidth={1.5} />
+                <span className="text-[#f4f4f5]/60 text-xs font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                  Prefer free stops only
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={freeOnly}
+                onClick={() => setFreeOnly(!freeOnly)}
+                className={`w-10 h-6 rounded-full transition-colors duration-200 focus:outline-none flex items-center p-0.5 cursor-pointer ${
+                  freeOnly ? 'bg-[#8ba88e]' : 'bg-[#f4f4f5]/10'
+                }`}
+              >
+                <div
+                  className={`w-5 h-5 rounded-full bg-[#131316] shadow-md transform transition-transform duration-200 ${
+                    freeOnly ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
             </div>
           </div>
 
@@ -1139,6 +1196,8 @@ export default function Home() {
   const [loadingMsg, setLoadingMsg] = useState(LOADING_MESSAGES[0]);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [weatherContext, setWeatherContext] = useState<string | null>(null);
+  const [numStops, setNumStops] = useState<number>(3);
+  const [freeOnly, setFreeOnly] = useState<boolean>(false);
 
   useEffect(() => {
     // 1. Register service worker
@@ -1189,7 +1248,9 @@ export default function Home() {
           end_location: end,
           time_budget_minutes: timeBudget,
           vibe: selectedVibe,
-          local_time: timeContext
+          local_time: timeContext,
+          num_stops: numStops,
+          free_only: freeOnly
         }),
       });
 
@@ -1306,6 +1367,10 @@ export default function Home() {
             customVibe={customVibe}
             setCustomVibe={setCustomVibe}
             deferredPrompt={deferredPrompt}
+            numStops={numStops}
+            setNumStops={setNumStops}
+            freeOnly={freeOnly}
+            setFreeOnly={setFreeOnly}
           />
         )}
         {screen === "loading" && (
