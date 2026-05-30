@@ -174,23 +174,40 @@ async def geocode_location(location: str) -> Optional[Dict[str, float]]:
     return None
 
 
+def _midpoint(a: Dict[str, float], b: Dict[str, float]) -> Dict[str, float]:
+    """Return the geographic midpoint between two lat/lng dicts."""
+    return {"lat": (a["lat"] + b["lat"]) / 2, "lng": (a["lng"] + b["lng"]) / 2}
+
+
 # ── Google Places API (New) ───────────────────────────────────────────────────
 
-async def _places_search_text(query: str, lat: float, lng: float) -> List[Dict]:
-    """Single Places API (New) searchText call."""
+async def _places_search_text(query: str, lat: float, lng: float, radius_m: float = 2000.0) -> List[Dict]:
+    """Single Places API (New) searchText call — strict radius via locationRestriction."""
+    import math
     try:
+        # Calculate bounding box (rectangle) from center and radius
+        # 1 degree of latitude is ~111,111 meters
+        delta_lat = radius_m / 111111.0
+        # 1 degree of longitude is ~111,111 * cos(latitude) meters
+        cos_lat = math.cos(math.radians(lat))
+        if cos_lat < 0.01:
+            cos_lat = 0.01
+        delta_lng = radius_m / (111111.0 * cos_lat)
+        
+        bbox = {
+            "rectangle": {
+                "low": {"latitude": lat - delta_lat, "longitude": lng - delta_lng},
+                "high": {"latitude": lat + delta_lat, "longitude": lng + delta_lng}
+            }
+        }
+
         async with httpx.AsyncClient(timeout=8.0) as client:
             res = await client.post(
                 "https://places.googleapis.com/v1/places:searchText",
                 json={
                     "textQuery": query,
                     "maxResultCount": 5,
-                    "locationBias": {
-                        "circle": {
-                            "center": {"latitude": lat, "longitude": lng},
-                            "radius": 1600.0,
-                        }
-                    },
+                    "locationRestriction": bbox,
                 },
                 headers={
                     "Content-Type": "application/json",
@@ -230,13 +247,17 @@ async def _places_search_text(query: str, lat: float, lng: float) -> List[Dict]:
         return []
 
 
-async def fetch_candidate_venues(start_ll: Dict, vibe: str) -> List[Dict]:
+async def fetch_candidate_venues(start_ll: Dict, end_ll: Optional[Dict], vibe: str) -> List[Dict]:
     """
-    Run all vibe-appropriate Places queries in parallel.
+    Run all vibe-appropriate Places queries in parallel, centered on the route MIDPOINT.
+    Uses strict locationRestriction so venues are guaranteed near the route corridor.
     Deduplicate by place_id and return top 20 sorted by rating.
     """
     queries = VIBE_QUERIES.get(vibe, VIBE_QUERIES["Spontaneous & Social"])
-    lat, lng = start_ll["lat"], start_ll["lng"]
+
+    # Center search on midpoint between start and end so venues are along the corridor
+    center = _midpoint(start_ll, end_ll) if end_ll else start_ll
+    lat, lng = center["lat"], center["lng"]
 
     results = await asyncio.gather(
         *[_places_search_text(q, lat, lng) for q in queries],
@@ -324,9 +345,10 @@ def _call_openai_rag(request: RouteRequest, venues: List[Dict]) -> V3ResponseLLM
     ]
     venues_context = "\n".join(venue_lines)
 
-    # Compute per-stop guidance so LLM fills the time budget properly
-    _stops = 3  # typical stops per route
-    _walk_allowance = 25  # rough total walking minutes
+    # Per-stop duration: budget minus realistic walking time (12 min per leg × n_stops legs)
+    _stops = 3
+    _walk_per_leg_mins = 12  # realistic city block walking between nearby stops
+    _walk_allowance = _walk_per_leg_mins * _stops
     _per_stop_mins = max(15, (request.time_budget_minutes - _walk_allowance) // _stops)
 
     system_prompt = f"""You are Wander — an urban experience curator with encyclopedic local knowledge.
@@ -379,7 +401,8 @@ Active vibe: {request.vibe}"""
 def _call_openai_fallback(request: RouteRequest) -> V3ResponseLLM:
     """Fallback when Google Places returns no results — GPT-4o generates from knowledge."""
     _stops = 3
-    _walk_allowance = 25
+    _walk_per_leg_mins = 12
+    _walk_allowance = _walk_per_leg_mins * _stops
     _per_stop_mins = max(15, (request.time_budget_minutes - _walk_allowance) // _stops)
 
     system_prompt = f"""You are Wander. Generate exactly 3 distinct walking routes.
@@ -444,10 +467,13 @@ async def generate_route(request: RouteRequest):
         if GOOGLE_KEY:
             # ── V3 RAG path ───────────────────────────────────────────────────
             start_ll = await geocode_location(request.start_location)
+            end_ll   = await geocode_location(request.end_location)
             if not start_ll:
                 start_ll = {"lat": 40.7580, "lng": -73.9855}  # NYC midtown default
+            if not end_ll:
+                end_ll = start_ll
 
-            venues = await fetch_candidate_venues(start_ll, request.vibe)
+            venues = await fetch_candidate_venues(start_ll, end_ll, request.vibe)
 
             if venues:
                 raw = _call_openai_rag(request, venues)
