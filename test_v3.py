@@ -31,8 +31,27 @@ try:
         headers={"Content-Type": "application/json"},
         method="POST"
     )
+    routes = []
     with urllib.request.urlopen(req, timeout=90) as res:
-        data = json.loads(res.read())
+        buffer = ""
+        while True:
+            chunk = res.read(1024)
+            if not chunk:
+                break
+            buffer += chunk.decode('utf-8')
+            lines = buffer.split("\n\n")
+            buffer = lines.pop()
+            for line in lines:
+                line = line.strip()
+                if not line or not line.startswith("data: "):
+                    continue
+                try:
+                    payload_data = json.loads(line[6:])
+                    if payload_data.get("type") == "route":
+                        routes.append(payload_data["route"])
+                except Exception as je:
+                    pass
+        data = {"routes": routes}
         elapsed = round(time.time() - start_time, 2)
 except urllib.error.HTTPError as e:
     print(f"\n❌ HTTP {e.code}: {e.read().decode()}")

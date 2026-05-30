@@ -444,7 +444,8 @@ def _call_openai_single_route_sync(
     venue_lines = [
         f"[{i+1}] {v['name']} | {v['address']} | "
         f"{'⭐ ' + str(v['rating']) if v.get('rating') else 'no rating'} | "
-        f"{', '.join(v['types'][:2]) if v.get('types') else ''}"
+        f"{', '.join(v['types'][:2]) if v.get('types') else ''} | "
+        f"Progression: {v.get('progression', 0.0)*100:.0f}% along route"
         for i, v in enumerate(venues)
     ]
     venues_context = "\n".join(venue_lines)
@@ -489,7 +490,7 @@ def _call_openai_single_route_sync(
     system_prompt = f"""You are Wander — an urban experience curator with encyclopedic local knowledge.
 Your life isn't a chore; wander. Help the user feel that.
 
-VERIFIED VENUES (sourced from Google Places — these are real, confirmed businesses):
+VERIFIED VENUES (sourced from Google Places — these are real, confirmed businesses, sorted in order of geographical progression from Start (0%) to End (100%)):
 {venues_context}
 
 MISSION: Build exactly ONE walking route from {request.start_location} to {request.end_location} matching this theme: {route_type_desc}.
@@ -505,7 +506,7 @@ TIME BUDGET: {request.time_budget_minutes} minutes TOTAL.
 
 STRICT RULES:
 1. Use ONLY venues from the list. Reference each by its [number] in venue_index. No invented stops.
-2. Stops must flow geographically toward {request.end_location}. Zero backtracking.
+2. Stops must progress geographically from {request.start_location} to {request.end_location}. Because the list above is sorted in increasing order of geographical progression, you MUST select your stops in strictly increasing index order (e.g., if your first stop is [3], your next stop must be [5] or higher, and the next even higher). Select stops that are distributed along the progression of the route (e.g., one from the early part of the list, one from the middle, and one from the later part of the list). Do NOT cluster all stops at the start or the end. Zero backtracking.
 3. Hard cap: total time (duration_mins + walk_to_next_mins for all stops) ≤ {request.time_budget_minutes} min.
 4. Write like a local who has lived here 10 years. Specific, warm. Never say "charming" or "vibrant."
 5. Insider tips must be genuinely useful and specific to this exact venue.
@@ -525,7 +526,7 @@ Active vibe / custom request: {request.vibe}"""
             },
         ],
         response_format=RouteOptionLLM,
-        temperature=0.85,
+        temperature=0.35,
     )
     return response.choices[0].message.parsed
 
@@ -672,11 +673,11 @@ async def _enrich_route(
     waypoints: List[WaypointV3] = []
     addresses: List[str] = []
 
-    for wp in raw_route.waypoints:
+    for i, wp in enumerate(raw_route.waypoints):
         idx = wp.venue_index - 1
         venue = venues[idx] if (0 <= idx < len(venues)) else None
 
-        name     = venue["name"]      if venue else f"Stop {wp.order}"
+        name     = venue["name"]      if venue else f"Stop {i + 1}"
         address  = venue["address"]   if venue else request.start_location
         rating   = venue.get("rating")    if venue else None
         photo_url = venue.get("photo_url") if venue else None
@@ -687,7 +688,7 @@ async def _enrich_route(
         addresses.append(address)
         waypoints.append(
             WaypointV3(
-                order=wp.order,
+                order=i + 1,
                 location_name=name,
                 address_hint=address,
                 google_rating=rating,
@@ -802,13 +803,28 @@ async def generate_route(request: RouteRequest):
                 else:
                     queries = VIBE_QUERIES[request.vibe]
                 
-                # Fetch candidate venues
-                center = _midpoint(start_ll, end_ll) if end_ll else start_ll
-                lat, lng = center["lat"], center["lng"]
-                results = await asyncio.gather(
-                    *[_places_search_text(q, lat, lng) for q in queries],
-                    return_exceptions=True,
-                )
+                # Define search centers along the journey: 25%, 50% (midpoint), 75%
+                # This ensures candidates are geographically distributed along the entire route corridor
+                def interpolate(a, b, fraction):
+                    return {
+                        "lat": a["lat"] + (b["lat"] - a["lat"]) * fraction,
+                        "lng": a["lng"] + (b["lng"] - a["lng"]) * fraction
+                    }
+                
+                centers = [
+                    interpolate(start_ll, end_ll, 0.25),
+                    interpolate(start_ll, end_ll, 0.50),
+                    interpolate(start_ll, end_ll, 0.75),
+                ]
+                
+                tasks = []
+                # Search with 1000m radius around each center to keep recommendations focused near the corridor
+                for center in centers:
+                    for q in queries:
+                        tasks.append(_places_search_text(q, center["lat"], center["lng"], radius_m=1000.0))
+                
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
                 seen = set()
                 for batch in results:
                     if isinstance(batch, list):
@@ -816,9 +832,26 @@ async def generate_route(request: RouteRequest):
                             pid = place.get("place_id") or place.get("name", "")
                             if pid and pid not in seen and place.get("name"):
                                 seen.add(pid)
+                                
+                                # Compute vector progression percentage along the start -> end vector
+                                v_lat = end_ll["lat"] - start_ll["lat"]
+                                v_lng = end_ll["lng"] - start_ll["lng"]
+                                u_lat = place["lat"] - start_ll["lat"]
+                                u_lng = place["lng"] - start_ll["lng"]
+                                
+                                dot_product = u_lat * v_lat + u_lng * v_lng
+                                vector_sq_len = v_lat**2 + v_lng**2
+                                progression = dot_product / vector_sq_len if vector_sq_len > 0 else 0.0
+                                
+                                place["progression"] = max(0.0, min(1.0, progression))
                                 venues.append(place)
+                
+                # Sort by rating and keep top 25 candidates to provide a rich spatial spread
                 venues.sort(key=lambda x: x.get("rating") or 0, reverse=True)
-                venues = venues[:20]
+                venues = venues[:25]
+                
+                # Sort the final candidates by geographical progression to prevent backtracking and ease LLM sequencing
+                venues.sort(key=lambda x: x.get("progression", 0.0))
 
             route_types = [
                 ("Route 1 (scenic & relaxed)", "scenic/relaxed walking experience"),
@@ -841,6 +874,11 @@ async def generate_route(request: RouteRequest):
                             previously_selected,
                             weather_info,
                             request.local_time
+                        )
+                        # Programmatically sort waypoints by progression to guarantee zero backtracking
+                        raw_route.waypoints.sort(
+                            key=lambda wp: venues[wp.venue_index - 1].get("progression", 0.0)
+                            if (0 <= wp.venue_index - 1 < len(venues)) else 0.0
                         )
                         enriched = await _enrich_route(request, raw_route, venues, start_ll, end_ll)
                         for wp in enriched.waypoints:
