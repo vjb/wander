@@ -49,64 +49,76 @@ wander accepts a starting location, an ending location, a time budget, and a des
 
 ## User Interaction & Flow
 
-The following diagram tracks the lifecycle of user actions, route generation, inline stop swapping, and spontaneous detour pivots in a left-to-right flow:
+The following sequence diagram tracks the lifecycle of user actions, route generation, inline stop swapping, and spontaneous detour pivots:
 
 ```mermaid
-graph LR
-    %% Setup Section
-    subgraph Setup ["Setup Form"]
-        A[Start & End Inputs] --> B[Budget & Slopes]
-        B --> C[Choose/Type Vibe]
+sequenceDiagram
+    autonumber
+    participant User as 👤 User / Frontend (Next.js)
+    participant API as ⚙️ FastAPI Backend
+    participant Map as 🗺️ Google Maps APIs
+    participant OpenAI as 🔮 OpenAI Client
+    participant DB as 💾 SQLite Database
+
+    %% --- INITIAL GENERATION FLOW ---
+    Note over User, API: 1. Initial Route Generation Flow
+    User->>API: Generate Route Request (Start, End, Vibe, Budget, Avoid Slopes)
+    API->>Map: Geocode Start/End Locations to Lat/Lng
+    Map-->>API: Geocoded Coordinates
+    
+    par Parallel Checks
+        API->>Map: Get direct baseline walk duration (Sanity check)
+        Map-->>API: Walk duration minutes
+        API->>OpenAI: Extract Vibe Queries (gpt-4o-mini)
+        OpenAI-->>API: Extracted queries list
     end
 
-    %% Route Generation Pipeline
-    subgraph Pipeline ["Generation Pipeline"]
-        C -->|Click Generate| Geocode[Geocode Locations]
-        Geocode --> par_begin(((Start Parallel Processing)))
-        
-        par_begin --> Weather[Fetch Weather]
-        par_begin --> Vibe[Extract Search Queries]
-        
-        Weather --> par_end(((End Parallel Processing)))
-        Vibe --> par_end
-        
-        par_end --> Sweep[Corridor Polyline Sweep]
-        Sweep --> RAG[RAG Venue Selection]
-        RAG --> Legs[Compute Walking Legs]
-        
-        Legs --> Incline{Avoid Slopes?}
-        Incline -->|Yes| Elev[Sample Google Elevation]
-        Elev --> Stream[Stream Itineraries via SSE]
-        Incline -->|No| Stream
+    API->>Map: Corridor Sweep: Parallel TextSearch along polyline points (radius 400m)
+    Map-->>API: 15-20 Verified Venue Candidates
+    
+    API->>OpenAI: Select and curate 3 itineraries via SSE (gpt-4)
+    OpenAI-->>API: Streams selected stop indices, theme, and insider tips
+    
+    API->>Map: Google Directions API: Get transit times for consecutive stop legs
+    Map-->>API: Leg durations & overview polylines
+
+    alt Avoid Slopes is Enabled
+        API->>Map: Google Elevation API: Sample elevation grades along legs
+        Map-->>API: Elevation data
+        Note over API: Incline validation (>8% safety check)
     end
 
-    %% Navigation & Interaction
-    subgraph Nav ["Navigation & Live Customization"]
-        Stream --> Display[Itinerary Screen]
-        Display -->|Start Wandering| Handoff[Google Maps Deep Link]
-        
-        %% Swap Stop Cycle
-        Display -->|Click Swap Stop| Swap[Local Candidate Query]
-        Swap --> SwapAI[GPT-4o Stop Selection & Curation]
-        SwapAI -->|Update Legs & Map| Display
-        
-        %% Live Walk & Detour Cycle
-        Display -->|Start Walk Mode| Walk[Live GPS Tracking]
-        Walk -->|Waypoint Proximity < 150m| Stamp[Passport Stamp Unlock]
-        Walk -->|Device Shake / Detour glow| Detour[Foursquare & OTM Sweep]
-        Detour --> DetourAI[GPT-4o Detour Curation]
-        DetourAI -->|Select Pivot Route| Pivot[Recalculate Legs & Directions]
-        Pivot --> Display
-    end
+    API->>DB: Save generated routes to shares table
+    API-->>User: Streams 3 structured itineraries (SSE completed)
 
-    %% Styling
-    style A fill:#131316,stroke:#8ba88e,stroke-width:1.5px
-    style Geocode fill:#131316,stroke:#8ba88e,stroke-width:1px
-    style Sweep fill:#131316,stroke:#8ba88e,stroke-width:1px
-    style RAG fill:#131316,stroke:#8ba88e,stroke-width:1px
-    style Display fill:#131316,stroke:#8ba88e,stroke-width:1.5px
-    style Handoff fill:#131316,stroke:#8ba88e,stroke-width:1.5px
-    style Walk fill:#131316,stroke:#8ba88e,stroke-width:1.5px
+    %% --- STOP SWAP CYCLE ---
+    Note over User, API: 2. Inline Waypoint Swap Cycle
+    User->>API: Swap Stop (active route, stop index, vibe, custom refinement)
+    API->>Map: Query alternative candidates within target radius
+    Map-->>API: Venue candidate list
+    API->>OpenAI: Select and curate replacement stop (gpt-4)
+    OpenAI-->>API: Selected stop details & new insider tip
+    API->>Map: Recalculate transit legs (Directions API)
+    Map-->>API: Updated leg durations & polyline path
+    API-->>User: Return updated single Route option
+
+    %% --- VIBE DETOUR CYCLE ---
+    Note over User, API: 3. Spontaneous Vibe Detour Pivot
+    Note over User: User shakes device or clicks glowing "detour me" button
+    User->>API: Fetch Vibe Detour (lat, lng, vibe, remaining budget)
+    API->>Map: Query local spots within 500m (Foursquare & OpenTripMap)
+    Map-->>API: Trending/Historic detour candidates
+    API->>OpenAI: Select and curate single detour (gpt-4)
+    OpenAI-->>API: Curated Detour stop & formatted Wikipedia/Foursquare tip
+    API->>Map: Directions API: Get walk minutes from current GPS to detour
+    Map-->>API: Transit walk minutes
+    API-->>User: Return Spontaneous Detour Option (modal preview)
+    
+    User->>API: Pivot Route (active route, detour stop, active index)
+    API->>API: Swap next unvisited waypoint with detour stop
+    API->>Map: Recalculate remaining legs & Maps deep link (Directions API)
+    Map-->>API: Updated walking durations & polylines
+    API-->>User: Return fully updated active route
 ```
 
 ---
