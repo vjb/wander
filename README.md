@@ -49,46 +49,64 @@ wander accepts a starting location, an ending location, a time budget, and a des
 
 ## User Interaction & Flow
 
-The following diagram tracks the lifecycle of user actions, route generation, inline stop swapping, and spontaneous detour pivots:
+The following diagram tracks the lifecycle of user actions, route generation, inline stop swapping, and spontaneous detour pivots in a left-to-right flow:
 
 ```mermaid
-graph TD
-    subgraph Setup ["Setup Screen"]
-        A[Enter Start/End Locations] --> B[Set Time, Stops, Budget, Avoid Slopes]
+graph LR
+    %% Setup Section
+    subgraph Setup ["Setup Form"]
+        A[Start & End Inputs] --> B[Budget & Slopes]
         B --> C[Choose/Type Vibe]
     end
 
-    subgraph Generation ["Route Generation"]
-        C -->|Click Generate| D[Geocode Locations]
-        D --> E[Fetch Weather]
-        E --> F[Extract Vibe Queries]
-        F --> G[Corridor Polyline Search]
-        G --> H[RAG Venue Selection]
-        H --> I[Recalculate Legs & Incline]
-        I --> J[Stream 3 Itineraries]
+    %% Route Generation Pipeline
+    subgraph Pipeline ["Generation Pipeline"]
+        C -->|Click Generate| Geocode[Geocode Locations]
+        Geocode --> par_begin(((Start Parallel Processing)))
+        
+        par_begin --> Weather[Fetch Weather]
+        par_begin --> Vibe[Extract Search Queries]
+        
+        Weather --> par_end(((End Parallel Processing)))
+        Vibe --> par_end
+        
+        par_end --> Sweep[Corridor Polyline Sweep]
+        Sweep --> RAG[RAG Venue Selection]
+        RAG --> Legs[Compute Walking Legs]
+        
+        Legs --> Incline{Avoid Slopes?}
+        Incline -->|Yes| Elev[Sample Google Elevation]
+        Elev --> Stream[Stream Itineraries via SSE]
+        Incline -->|No| Stream
     end
 
-    subgraph Navigation ["Walk & Customization"]
-        J --> K[Select Itinerary]
-        K --> L[Start Wandering]
-        L --> M[Google Maps Handoff]
+    %% Navigation & Interaction
+    subgraph Nav ["Navigation & Live Customization"]
+        Stream --> Display[Itinerary Screen]
+        Display -->|Start Wandering| Handoff[Google Maps Deep Link]
         
-        K -->|Swap Stop| N[Query Replacements]
-        N --> O[Rewrite Timeline Node]
-        O -->|Pivot Route| K
+        %% Swap Stop Cycle
+        Display -->|Click Swap Stop| Swap[Local Candidate Query]
+        Swap --> SwapAI[GPT-4o Stop Selection & Curation]
+        SwapAI -->|Update Legs & Map| Display
         
-        K -->|Live GPS Walk Mode| P[Real-Time Proximity Stamps]
-        P -->|Device Shake or Detour Glow| Q[Vibe Detour Search]
-        Q --> R[Select Detour Option]
-        R -->|Pivot Detour| S[Re-route Walk Timeline]
-        S --> K
+        %% Live Walk & Detour Cycle
+        Display -->|Start Walk Mode| Walk[Live GPS Tracking]
+        Walk -->|Waypoint Proximity < 150m| Stamp[Passport Stamp Unlock]
+        Walk -->|Device Shake / Detour glow| Detour[Foursquare & OTM Sweep]
+        Detour --> DetourAI[GPT-4o Detour Curation]
+        DetourAI -->|Select Pivot Route| Pivot[Recalculate Legs & Directions]
+        Pivot --> Display
     end
 
-    style A fill:#1a1a24,stroke:#8ba88e,stroke-width:1.5px
-    style J fill:#1a1a24,stroke:#8ba88e,stroke-width:1.5px
-    style L fill:#1a1a24,stroke:#8ba88e,stroke-width:1.5px
-    style N fill:#1a1a24,stroke:#8ba88e,stroke-width:1.5px
-    style Q fill:#1a1a24,stroke:#8ba88e,stroke-width:1.5px
+    %% Styling
+    style A fill:#131316,stroke:#8ba88e,stroke-width:1.5px
+    style Geocode fill:#131316,stroke:#8ba88e,stroke-width:1px
+    style Sweep fill:#131316,stroke:#8ba88e,stroke-width:1px
+    style RAG fill:#131316,stroke:#8ba88e,stroke-width:1px
+    style Display fill:#131316,stroke:#8ba88e,stroke-width:1.5px
+    style Handoff fill:#131316,stroke:#8ba88e,stroke-width:1.5px
+    style Walk fill:#131316,stroke:#8ba88e,stroke-width:1.5px
 ```
 
 ---
