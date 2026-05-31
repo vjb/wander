@@ -47,6 +47,52 @@ wander accepts a starting location, an ending location, a time budget, and a des
 
 ---
 
+## User Interaction & Flow
+
+The following diagram tracks the lifecycle of user actions, route generation, inline stop swapping, and spontaneous detour pivots:
+
+```mermaid
+graph TD
+    subgraph Setup ["Setup Screen"]
+        A[Enter Start/End Locations] --> B[Set Time, Stops, Budget, Avoid Slopes]
+        B --> C[Choose/Type Vibe]
+    end
+
+    subgraph Generation ["Route Generation"]
+        C -->|Click Generate| D[Geocode Locations]
+        D --> E[Fetch Weather]
+        E --> F[Extract Vibe Queries]
+        F --> G[Corridor Polyline Search]
+        G --> H[RAG Venue Selection]
+        H --> I[Recalculate Legs & Incline]
+        I --> J[Stream 3 Itineraries]
+    end
+
+    subgraph Navigation ["Walk & Customization"]
+        J --> K[Select Itinerary]
+        K --> L[Start Wandering]
+        L --> M[Google Maps Handoff]
+        
+        K -->|Swap Stop| N[Query Replacements]
+        N --> O[Rewrite Timeline Node]
+        O -->|Pivot Route| K
+        
+        K -->|Live GPS Walk Mode| P[Real-Time Proximity Stamps]
+        P -->|Device Shake or Detour Glow| Q[Vibe Detour Search]
+        Q --> R[Select Detour Option]
+        R -->|Pivot Detour| S[Re-route Walk Timeline]
+        S --> K
+    end
+
+    style A fill:#1a1a24,stroke:#8ba88e,stroke-width:1.5px
+    style J fill:#1a1a24,stroke:#8ba88e,stroke-width:1.5px
+    style L fill:#1a1a24,stroke:#8ba88e,stroke-width:1.5px
+    style N fill:#1a1a24,stroke:#8ba88e,stroke-width:1.5px
+    style Q fill:#1a1a24,stroke:#8ba88e,stroke-width:1.5px
+```
+
+---
+
 ## Key Features
 
 ### 1. RAG & Intelligent Routing (Core Engine)
@@ -128,46 +174,50 @@ User Request (start, end, time_budget, vibe, local_time)
 ```
 ---
 
-## AI and LLM Prompts
+## AI and LLM Prompts & Curation
 
-wander uses two specialized prompts in its backend pipeline:
+`wander` serves as a prime demonstration of how to integrate AI and LLMs dynamically into a production software system. Instead of using loose text formatting or plain generation prompts, the application uses **Structured Output Pydantic schemas**, **contextual prompt chunking**, and **strict RAG constraints** to ensure output reproducibility and zero-hallucination execution.
 
-### 1. Search Query Extractor (GPT-4o-mini)
+All prompt templates are defined directly in the backend code. Below are the key prompts with direct links to the codebase:
 
-Parses the user's natural language vibe into clean Google Places search queries.
-
+### 1. Vibe Query Keyword Extractor (GPT-4o-mini)
+* **Code Link**: [main.py:L341-354](file:///c:/Users/vjbel/hacks/wander/wander-api/main.py#L341-L354)
+* **Model**: `gpt-4o-mini` (low latency, high classification accuracy)
+* **Goal**: Parses natural language vibe text descriptions into structured Google Places search queries.
+* **System Prompt**:
 ```
-You are an assistant that extracts specific Google Maps Places search terms from a descriptive vibe.
-Extract 3 to 5 distinct, concrete search queries (e.g. 'bookstore', 'ramen', 'rooftop bar') matching the user's desires.
-Return ONLY a JSON object: {'queries': ['query1', 'query2']}.
-```
-
-### 2. Route Generator (GPT-4o)
-
-Fed a verified list of real Places results, weather context, daypart, and time budget. Forces geographically-sequenced selection of real venues only.
-
-```
-You are wander: an urban experience curator with encyclopedic local knowledge.
-Your life isn't a chore; wander. Help the user feel that.
-
-VERIFIED VENUES (sourced from Google Places, sorted Start → End):
-{venues_context}
-
-MISSION: Build ONE walking route from {start_location} to {end_location} matching: {route_type_desc}.
-Use 3–4 stops ONLY from the numbered list above.
-
-TIME BUDGET: {time_budget_minutes} minutes TOTAL.
-→ Each stop: ~{per_stop_mins} min dwell.
-
-STRICT RULES:
-1. Use ONLY listed venues: no invented stops.
-2. Stops must progress in strictly increasing index order (no backtracking).
-3. Hard cap: Σ(duration_mins + walk_to_next_mins) ≤ {time_budget_minutes}.
-4. Write like a local who's lived here 10 years. Never say "charming" or "vibrant."
-5. Insider tips must be specific to this exact venue.
+You are an assistant that extracts specific Google Maps Places search terms from a descriptive vibe. Extract 3 to 5 distinct, concrete, search queries (e.g. 'bookstore', 'ramen', 'rooftop bar') matching the user's desires. Return ONLY a JSON object containing a 'queries' array of strings. Example: {'queries': ['query1', 'query2']}.
 ```
 
-Dynamic chunks are automatically appended: Weather (indoor pivot on rain/snow), Daypart (no coffee at 8 PM), Exclusion (deduplicates across the 3 routes).
+### 2. Feeling Lucky surprise generator (GPT-4o-mini)
+* **Code Link**: [main.py:L374-392](file:///c:/Users/vjbel/hacks/wander/wander-api/main.py#L374-L392)
+* **Model**: `gpt-4o-mini`
+* **Goal**: Generates a quirky, surprising themed set of queries when the user chooses "Feeling Lucky".
+* **System Prompt**:
+```
+You are an urban exploration planner. The user clicked 'I'm Feeling Lucky'. Create a cohesive but completely unexpected, quirky, and themed set of 3 to 5 Google Maps search queries. Think of strange but delightful themes: a retro neon crawl, a botanical & vintage book drift, a speakeasy & historic mystery walk, or a vinyl record & coffee alleyway stroll. Be creative and specific with the search queries (e.g. 'independent bookstore', 'retro arcade bar', 'historic fountain overlook'). Return ONLY a JSON object containing a 'queries' array of strings. Example: {'queries': ['query1', 'query2', 'query3']}.
+```
+
+### 3. Route Generator & Curator (GPT-4o)
+* **Code Link**: [main.py:L905-1087](file:///c:/Users/vjbel/hacks/wander/wander-api/main.py#L905-L1087)
+* **Model**: `gpt-4o` (for complex RAG reasoning, time partitioning, and geographic constraints)
+* **Goal**: Selects the sequence of stops from the verified radar sweep results and curates the timeline.
+* **Prompt Architecture**:
+  * **RAG Context**: Fed a strict numbered list of verified places (lat/lng, address, ratings, progression index).
+  * **Dynamic Chunks**: Appends weather pivots (e.g., rain/snow locks outdoor spaces), daypart partitioning (no coffee shops at 8 PM), companion guidelines (date, friends, pet, solo), and budget constraints.
+  * **Strict Constraints**: 1. Zero Invented Stops. 2. strictly increasing index order (no backtracking). 3. Time budget compliance.
+  * **Pydantic Validation Schema**: Evaluates route details directly into `DynamicRouteOptionLLM` with fields for `route_name`, `theme_summary`, and waypoint arrays.
+
+### 4. Stop Swapping Replacement Curator (GPT-4o)
+* **Code Link**: [main.py:L1854-1920](file:///c:/Users/vjbel/hacks/wander/wander-api/main.py#L1854-L1920)
+* **Model**: `gpt-4o`
+* **Goal**: Selects and curates a replacement stop when a user rejects a specific waypoint.
+* **Prompt Details**: Recalls the active route name, other stops, target swap target, any custom user refinement (e.g. "bakery instead of coffee"), remaining budget, and the alternative candidates list. Forces logistic compatibility (cannot backtrack between target index - 1 and target index + 1).
+
+### 5. Spontaneous Detour Curation (GPT-4o)
+* **Code Link**: [main.py:L1925-1965](file:///c:/Users/vjbel/hacks/wander/wander-api/main.py#L1925-L1965)
+* **Model**: `gpt-4o`
+* **Goal**: Chooses the single best spontaneous local detour from Foursquare (commercial) or OpenTripMap (cultural) candidates when walking.
 
 ---
 

@@ -94,6 +94,7 @@ unlimited stop swaps corridor sweeps.               referral booking fee Garmin 
 * **Accenture Strategy: Layered Cost Management**:
   * **Level 1: Route Caching (SQLite)**: Persisting generated routes reduces duplicate API hits for popular start/end coordinates.
   * **Level 2: Dual-Model Routing**: Extractor model runs on GPT-4o-mini (low cost). Curated generator runs on GPT-4o.
+  * **Level 2b: Structured Schema Enforcement**: Eliminates API retry overhead by forcing output compliance directly via OpenAI Pydantic parsing.
   * **Level 3: Corridor Search Thinning**: Grouping geolocated sweep queries to minimize Google Places API billing calls.
   * **Level 4: Detour APIs (Foursquare & OpenTripMap)**: Offloading detours to commercial & cultural directories with generous free-call quotas (Foursquare, OpenTripMap) keeps detour search variable cost at $0.00.
   * **Unit Target**: Total cost per route generation: ~$0.05. Target revenue per generation (blended ads/subs): ~$0.14. Gross Margin: 64%.
