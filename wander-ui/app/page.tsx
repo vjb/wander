@@ -30,6 +30,9 @@ import {
   Lock,
   Wand2,
   ChevronDown,
+  ThumbsUp,
+  ThumbsDown,
+  History,
 } from "lucide-react";
 
 import { WanderMap } from "./components/WanderMap";
@@ -38,6 +41,7 @@ import WanderCompleteOverlay from "./components/WanderCompleteOverlay";
 import { useWalkMode } from "./hooks/useWalkMode";
 import { usePassport, type PassportEntry, LEVEL_BADGE } from "./hooks/usePassport";
 import { usePreferences } from "./hooks/usePreferences";
+import { useWanderHistory, type WanderHistoryEntry } from "./hooks/useWanderHistory";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -77,6 +81,7 @@ interface WanderRouteOptionV3 {
   waypoints: WaypointV3[];
   navigation_deep_link: string;
   estimated_total_cost_usd?: number;
+  route_polyline?: number[][] | null;
 }
 
 interface WanderV3Response {
@@ -334,6 +339,7 @@ function InputScreen({
   vibe, setVibe,
   onWander, error,
   handleLocate, isLocating,
+  locateError,
   customVibe, setCustomVibe,
   deferredPrompt,
   numStops, setNumStops,
@@ -345,6 +351,7 @@ function InputScreen({
   setHasManuallySetStops,
   passportCount,
   onOpenPassport,
+  onShowHistory,
   isRoundTrip, setIsRoundTrip,
   comfortMode, setComfortMode,
 }: {
@@ -358,6 +365,7 @@ function InputScreen({
   error: string | null;
   handleLocate: () => void;
   isLocating: boolean;
+  locateError: string | null;
   customVibe: string; setCustomVibe: (v: string) => void;
   deferredPrompt: any;
   numStops: number; setNumStops: (v: number) => void;
@@ -372,6 +380,7 @@ function InputScreen({
   setHasManuallySetStops: (v: boolean) => void;
   passportCount: number;
   onOpenPassport: () => void;
+  onShowHistory: () => void;
   isRoundTrip: boolean;
   setIsRoundTrip: (v: boolean) => void;
   comfortMode: boolean;
@@ -437,6 +446,16 @@ function InputScreen({
               {passportCount} {passportCount === 1 ? "neighborhood" : "neighborhoods"}
             </button>
           )}
+          {/* ── History button ── */}
+          <button
+            onClick={onShowHistory}
+            className="ml-1 flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[#f4f4f5]/15 text-[#f4f4f5]/35 text-[11px] font-medium tracking-wide hover:border-[#f4f4f5]/25 hover:text-[#f4f4f5]/60 transition-all duration-200"
+            style={{ fontFamily: "var(--font-inter)" }}
+            title="See recent wanders"
+          >
+            <History className="w-3 h-3" strokeWidth={1.5} />
+            history
+          </button>
           {/* ── Comfort mode toggle ── */}
           <button
             onClick={() => setComfortMode(!comfortMode)}
@@ -496,6 +515,13 @@ function InputScreen({
                 {isLocating ? <Loader2 className={`${comfortMode ? 'w-5 h-5' : 'w-4 h-4'} animate-spin`} /> : <LocateFixed className={`${comfortMode ? 'w-5 h-5' : 'w-4 h-4'}`} strokeWidth={1.5} />}
               </button>
             </div>
+            {/* Locate error feedback */}
+            {locateError && (
+              <div className="px-1 pt-1.5 pb-0.5 text-[11px] text-amber-400/70 flex items-center gap-1" style={{ fontFamily: "var(--font-inter)" }}>
+                <span>⚠</span>
+                <span>{locateError}</span>
+              </div>
+            )}
 
             {/* Round-trip connector row */}
             <div className="flex items-center gap-3 py-2 px-1">
@@ -1033,6 +1059,8 @@ function WaypointCard({
   vibe,
   onSwapWaypoint,
   isSwapping = false,
+  currentRating,
+  onRate,
 }: {
   waypoint: WaypointV3;
   isNearby?: boolean;
@@ -1042,6 +1070,8 @@ function WaypointCard({
   vibe: VibeId | "";
   onSwapWaypoint?: (index: number, customRefinement?: string) => Promise<void>;
   isSwapping?: boolean;
+  currentRating?: "up" | "down" | undefined;
+  onRate?: (stopName: string, rating: "up" | "down") => void;
 }) {
 
   const [swapMenuOpen, setSwapMenuOpen] = useState(false);
@@ -1290,6 +1320,35 @@ function WaypointCard({
                 <Wand2 className="w-3.5 h-3.5" strokeWidth={1.5} />
                 swap stop
               </button>
+            )}
+            {/* Rating buttons */}
+            {onRate && (
+              <div className="flex items-center gap-2.5 ml-auto">
+                <button
+                  type="button"
+                  onClick={() => onRate(waypoint.location_name, "up")}
+                  className={`flex items-center gap-1 text-[11px] transition-all cursor-pointer ${
+                    currentRating === "up"
+                      ? "text-[#8ba88e]"
+                      : "text-[#f4f4f5]/25 hover:text-[#f4f4f5]/55"
+                  }`}
+                  title="This stop was great"
+                >
+                  <ThumbsUp className="w-3 h-3" strokeWidth={1.5} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRate(waypoint.location_name, "down")}
+                  className={`flex items-center gap-1 text-[11px] transition-all cursor-pointer ${
+                    currentRating === "down"
+                      ? "text-red-400/70"
+                      : "text-[#f4f4f5]/25 hover:text-[#f4f4f5]/55"
+                  }`}
+                  title="This stop wasn't for me"
+                >
+                  <ThumbsDown className="w-3 h-3" strokeWidth={1.5} />
+                </button>
+              </div>
             )}
           {/* Insider Tip — always visible if present */}
           {waypoint.insider_tip && (
@@ -2862,6 +2921,10 @@ export default function Home() {
   const [companion, setCompanion] = useState<string>("solo");
   const [isRoundTrip, setIsRoundTrip] = useState(false);
   const [comfortMode, setComfortMode] = useState(false);
+  const [locateError, setLocateError] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
   const effectiveTimeBudget = inputMode === "steps" ? Math.round(stepGoal / 120) + (numStops * 25) : timeBudget;
 
@@ -2874,7 +2937,10 @@ export default function Home() {
   const { passport, passportCount, totalStops, streakDays, totalWanders, addStamp, clearPassport } = usePassport();
   const [passportOpen, setPassportOpen] = useState(false);
 
-  // ── Preference Memory (Rec 5) ──
+  // ── Wander History ──
+  const { history: wanderHistory, saveWander: saveWanderHistory, updateRating } = useWanderHistory();
+
+  // ── Preference Memory ──
   const { preferences, isLoaded, saveWander } = usePreferences();
 
   // Pre-fill form from preferences on first load
@@ -3119,6 +3185,17 @@ export default function Home() {
 
             // Switch screen to route view immediately when any route is ready!
             setScreen("route");
+          } else if (data.type === "done") {
+            // Save the first route to history after stream completes
+            if (currentRoutes.length > 0) {
+              const savedId = saveWanderHistory(
+                currentRoutes[0],
+                vibe || customVibe,
+                start,
+                end
+              );
+              setCurrentHistoryId(savedId);
+            }
           } else if (data.type === "error") {
             throw new Error(data.detail || "Server error curating routes");
           }
@@ -3156,10 +3233,11 @@ export default function Home() {
 
   const handleLocate = useCallback(() => {
     if (!navigator.geolocation) {
-      alert("Geolocation is not supported by your browser");
+      setLocateError("geolocation is not supported by your browser");
       return;
     }
     setIsLocating(true);
+    setLocateError(null);
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         try {
@@ -3167,16 +3245,24 @@ export default function Home() {
           const data = await res.json();
           if (data.address) {
             setStart(data.address);
+            setLocateError(null);
           }
         } catch (e) {
           console.error("Geocoding failed", e);
         }
         setIsLocating(false);
       },
-      (error) => {
-        console.error(error);
+      (err) => {
+        if (err.code === 1) {
+          setLocateError("location access denied — enable in browser settings or type your starting point");
+        } else if (err.code === 2) {
+          setLocateError("location unavailable — please type your starting point");
+        } else {
+          setLocateError("couldn't get your location — please type your starting point");
+        }
         setIsLocating(false);
-      }
+      },
+      { timeout: 8000 }
     );
   }, []);
 
@@ -3198,6 +3284,7 @@ export default function Home() {
             error={error}
             handleLocate={handleLocate}
             isLocating={isLocating}
+            locateError={locateError}
             customVibe={customVibe}
             setCustomVibe={setCustomVibe}
             deferredPrompt={deferredPrompt}
@@ -3217,6 +3304,7 @@ export default function Home() {
             setHasManuallySetStops={setHasManuallySetStops}
             passportCount={passportCount}
             onOpenPassport={() => setPassportOpen(true)}
+            onShowHistory={() => setShowHistory((h) => !h)}
             isRoundTrip={isRoundTrip}
             setIsRoundTrip={setIsRoundTrip}
             comfortMode={comfortMode}
@@ -3251,6 +3339,104 @@ export default function Home() {
             onClose={() => setPassportOpen(false)}
             onClear={() => { clearPassport(); setPassportOpen(false); }}
           />
+        )}
+      </AnimatePresence>
+
+      {/* ── History Panel ── */}
+      <AnimatePresence>
+        {showHistory && screen === "input" && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="fixed top-16 right-4 left-4 z-50 max-w-sm mx-auto glass border border-[#f4f4f5]/8 rounded-2xl p-4 shadow-2xl"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[#f4f4f5]/50 text-[11px] font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-inter)" }}>recent wanders</span>
+              <button onClick={() => setShowHistory(false)} className="text-[#f4f4f5]/30 hover:text-[#f4f4f5]/60 transition-colors cursor-pointer">
+                <X className="w-3.5 h-3.5" strokeWidth={2} />
+              </button>
+            </div>
+            {wanderHistory.length === 0 ? (
+              <p className="text-[#f4f4f5]/25 text-xs font-light text-center py-4" style={{ fontFamily: "var(--font-inter)" }}>no wanders yet — go explore!</p>
+            ) : (
+              <div className="space-y-2">
+                {wanderHistory.slice(0, 5).map(entry => (
+                  <div key={entry.id} className="flex items-start justify-between gap-2 py-2 border-b border-[#f4f4f5]/5 last:border-0">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[#f4f4f5]/75 text-[12px] font-medium truncate" style={{ fontFamily: "var(--font-inter)" }}>{entry.route_name}</p>
+                      <p className="text-[#f4f4f5]/35 text-[10px] font-light truncate" style={{ fontFamily: "var(--font-inter)" }}>{entry.start_location} → {entry.end_location}</p>
+                      <p className="text-[#8ba88e]/60 text-[10px] font-light" style={{ fontFamily: "var(--font-inter)" }}>{new Date(entry.saved_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</p>
+                    </div>
+                    <span className="shrink-0 text-[10px] text-[#f4f4f5]/25 bg-[#f4f4f5]/5 px-2 py-0.5 rounded-full" style={{ fontFamily: "var(--font-inter)" }}>{entry.vibe?.split(" ").slice(0, 2).join(" ")}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Post-Walk Feedback Modal ── */}
+      <AnimatePresence>
+        {showFeedbackModal && routeData?.routes?.[0] && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-[#131316]/90 backdrop-blur-sm flex items-end justify-center p-4"
+          >
+            <motion.div
+              initial={{ y: 60, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 60, opacity: 0 }}
+              className="glass border border-[#f4f4f5]/8 rounded-2xl p-6 w-full max-w-sm"
+            >
+              <h3 className="text-[#f4f4f5]/80 text-lg mb-1" style={{ fontFamily: "var(--font-playfair)" }}>
+                <em>how was your wander?</em>
+              </h3>
+              <p className="text-[#f4f4f5]/35 text-xs font-light mb-5" style={{ fontFamily: "var(--font-inter)" }}>rate your stops — it helps us get better</p>
+              <div className="space-y-3 mb-6">
+                {routeData.routes[0].waypoints.map((wp) => {
+                  const rating = currentHistoryId
+                    ? wanderHistory.find(h => h.id === currentHistoryId)?.ratings[wp.location_name]
+                    : undefined;
+                  return (
+                    <div key={wp.order} className="flex items-center justify-between">
+                      <span className="text-[#f4f4f5]/60 text-[12px] font-light truncate flex-1 mr-3" style={{ fontFamily: "var(--font-inter)" }}>{wp.location_name}</span>
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => {
+                            if (currentHistoryId) updateRating(currentHistoryId, wp.location_name, "up");
+                            fetch("/api/rate-stop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ route_id: currentHistoryId || "anon", stop_name: wp.location_name, rating: "up", vibe: vibe || customVibe }) }).catch(() => {});
+                          }}
+                          className={`transition-all cursor-pointer ${rating === "up" ? "text-[#8ba88e]" : "text-[#f4f4f5]/25 hover:text-[#f4f4f5]/60"}`}
+                        >
+                          <ThumbsUp className="w-4 h-4" strokeWidth={1.5} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (currentHistoryId) updateRating(currentHistoryId, wp.location_name, "down");
+                            fetch("/api/rate-stop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ route_id: currentHistoryId || "anon", stop_name: wp.location_name, rating: "down", vibe: vibe || customVibe }) }).catch(() => {});
+                          }}
+                          className={`transition-all cursor-pointer ${rating === "down" ? "text-red-400/70" : "text-[#f4f4f5]/25 hover:text-[#f4f4f5]/60"}`}
+                        >
+                          <ThumbsDown className="w-4 h-4" strokeWidth={1.5} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <button
+                onClick={() => setShowFeedbackModal(false)}
+                className="w-full py-3 rounded-xl bg-[#8ba88e] text-[#131316] text-sm font-medium cursor-pointer hover:bg-[#97b59a] transition-colors"
+                style={{ fontFamily: "var(--font-inter)" }}
+              >
+                done
+              </button>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </main>

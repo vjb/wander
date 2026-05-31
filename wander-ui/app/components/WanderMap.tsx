@@ -26,6 +26,7 @@ interface RouteData {
   start_location?: string;
   end_location?: string;
   waypoints: WaypointData[];
+  route_polyline?: number[][] | null;
 }
 
 interface WanderMapProps {
@@ -144,8 +145,19 @@ export function WanderMap({ route }: WanderMapProps) {
         { maxZoom: 19, subdomains: "abcd" }
       ).addTo(map);
 
-      // ── Route polyline — matcha glow ──
-      if (coords.length >= 2) {
+      // ── Route polyline — real walking path or fallback to straight pins ──
+      if (route.route_polyline && route.route_polyline.length >= 2) {
+        // Real walking path from Directions API
+        const pathCoords: [number, number][] = route.route_polyline.map(pt => [pt[0], pt[1]] as [number, number]);
+        // Subtle glow shadow
+        L.polyline(pathCoords, { color: "#8ba88e", weight: 12, opacity: 0.08 }).addTo(map);
+        // Crisp route line
+        L.polyline(pathCoords, {
+          color: "#8ba88e", weight: 3, opacity: 0.90,
+          lineCap: "round", lineJoin: "round",
+        }).addTo(map);
+      } else if (coords.length >= 2) {
+        // Fallback: dashed straight line between waypoint pins
         L.polyline(coords, { color: "#8ba88e", weight: 10, opacity: 0.10 }).addTo(map);
         L.polyline(coords, {
           color: "#8ba88e", weight: 3, opacity: 0.85,

@@ -10,13 +10,13 @@ Wander is a **RAG (Retrieval-Augmented Generation) application** at its core. Re
 
 | Call | Model | Temp | Output Format | Where |
 |---|---|---|---|---|
-| Route generation (×3 parallel) | `gpt-4o` | 0.35 | Structured JSON (Pydantic) | [`_call_openai_single_route_sync`](../wander-api/main.py#L1092) |
-| Stop swap | `gpt-4o` | 0.7 | Structured JSON (Pydantic) | [`_call_openai_single_venue_swap_sync`](../wander-api/main.py#L2010) |
-| Spontaneous detour | `gpt-4o` | 0.7 | Structured JSON (Pydantic) | [`_call_openai_single_venue_detour_sync`](../wander-api/main.py#L2061) |
-| Pacing advisor | `gpt-4o-mini` | 0.2 | Structured JSON (Pydantic) | [`/api/pacing-advisor`](../wander-api/main.py#L1851) |
-| Custom vibe → search queries | `gpt-4o-mini` | 0.0 | JSON object | [`_extract_custom_queries`](../wander-api/main.py#L350) |
-| Feeling Lucky → surprise theme | `gpt-4o-mini` | 1.0 | JSON object | [`_extract_lucky_queries`](../wander-api/main.py#L385) |
-| Location trivia (loading screen) | `gpt-4o-mini` | 0.8 | JSON object | [`_fetch_location_trivia`](../wander-api/main.py#L425) |
+| Route generation (×3 parallel) | `gpt-4o` | 0.35 | Structured JSON (Pydantic) | [`_call_openai_single_route_async`](../wander-api/main.py#L966) |
+| Stop swap | `gpt-4o` | 0.7 | Structured JSON (Pydantic) | [`_call_openai_single_venue_swap_async`](../wander-api/main.py#L1978) |
+| Spontaneous detour | `gpt-4o` | 0.7 | Structured JSON (Pydantic) | [`_call_openai_single_venue_detour_async`](../wander-api/main.py#L2045) |
+| Pacing advisor | `gpt-4o-mini` | 0.2 | Structured JSON (Pydantic) | [`/api/pacing-advisor`](../wander-api/main.py#L1795) |
+| Custom vibe → search queries | `gpt-4o-mini` | 0.0 | JSON object | [`_extract_custom_queries`](../wander-api/main.py#L382) |
+| Feeling Lucky → surprise theme | `gpt-4o-mini` | 1.0 | JSON object | [`_extract_lucky_queries`](../wander-api/main.py#L420) |
+| Location trivia (loading screen) | `gpt-4o-mini` | 0.8 | JSON object | [`_fetch_location_trivia`](../wander-api/main.py#L465) |
 
 **Why two models?**
 - `gpt-4o` is used for anything that requires creative judgment, local knowledge depth, or multi-constraint reasoning (route curation, stop swaps, detours).
@@ -26,11 +26,12 @@ Wander is a **RAG (Retrieval-Augmented Generation) application** at its core. Re
 
 ## 1. Route Generation — The Core LLM Call
 
-**Function:** [`_call_openai_single_route_sync`](../wander-api/main.py#L971)  
+**Function:** [`_call_openai_single_route_async`](../wander-api/main.py#L966)  
 **Model:** `gpt-4o`  
 **Temperature:** `0.35`  
-**Output format:** `openai_client.beta.chat.completions.parse()` with a Pydantic `DynamicRouteOptionLLM` schema  
-**Called:** 3× in parallel via `asyncio.create_task` inside [`event_generator()`](../wander-api/main.py#L1607)
+**Client:** `AsyncOpenAI` — called directly with `await` (no thread pool)  
+**Output format:** `aclient.beta.chat.completions.parse()` with a Pydantic `DynamicRouteOptionLLM` schema  
+**Called:** 3× in parallel via `asyncio.create_task` inside [`event_generator()`](../wander-api/main.py#L1642)
 
 ### What it receives
 
@@ -457,3 +458,50 @@ POST /api/generate-route
 | **Total (typical)** | | | | **~$0.21–$0.23** |
 
 Swap and detour are on-demand (~$0.03 each) and not included in the base cost.
+
+---
+
+## Async Architecture
+
+All LLM calls now use `AsyncOpenAI` (`aclient`) called directly with `await` — no `asyncio.to_thread()` or `run_in_executor()` thread pool wrapping. This is a critical difference:
+
+- **Old approach:** `await loop.run_in_executor(None, lambda: openai_client.chat.completions.create(...))` — this dispatches the blocking sync call to a thread pool. The event loop is free but a thread is consumed per concurrent LLM call.
+- **New approach:** `await aclient.chat.completions.create(...)` — true async I/O. The event loop handles multiplexed concurrent requests natively. No thread overhead.
+
+With 3 parallel route generation calls + trivia + optional vibe queries all firing simultaneously, the async client eliminates the bottleneck at peak concurrency.
+
+---
+
+## Rate Limiting
+
+All hot endpoints are protected by [`slowapi`](https://github.com/laurentS/slowapi) with per-IP rate limits:
+
+| Endpoint | Limit |
+|---|---|
+| `POST /api/generate-route` | 5 / minute |
+| `POST /api/swap-waypoint` | 10 / minute |
+| `POST /api/vibe-detour` | 10 / minute |
+| `POST /api/pacing-advisor` | 20 / minute |
+
+Exceeding a limit returns HTTP 429 with a standard `slowapi` error response.
+
+---
+
+## Feedback Loop: Stop Ratings
+
+After every completed walk, the frontend presents a **post-walk feedback modal** where users can rate each stop thumbs up/down. Ratings are:
+
+1. Stored in `localStorage` via [`useWanderHistory`](../wander-ui/app/hooks/useWanderHistory.ts) — persisted client-side across sessions
+2. POSTed to [`POST /api/rate-stop`](../wander-api/main.py#L2569) — appended to `ratings.jsonl` on the server
+
+The `ratings.jsonl` format:
+```json
+{"timestamp": 1748730000.0, "route_id": "w_1748730000000", "stop_name": "Bryant Park", "rating": "up", "vibe": "Green & Scenic", "address": "Bryant Park, NYC"}
+```
+
+This data can be used to:
+- Filter out consistently down-rated venues from future route generation
+- Weight venue scoring in the RAG retrieval step
+- Identify which vibes produce the best-rated stops
+
+No ML training happens yet — the ratings are collected passively for future analysis. The endpoint is fire-and-forget (failures are swallowed silently on the frontend so they never block the user).

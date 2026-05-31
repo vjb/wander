@@ -14,6 +14,8 @@ import json
 import logging
 import math
 import os
+import time
+from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import quote_plus
 
@@ -21,11 +23,14 @@ import httpx
 from dotenv import load_dotenv
 
 logger = logging.getLogger("uvicorn.error")
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 from pydantic import BaseModel, Field
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 import database
 import polyline
@@ -52,13 +57,17 @@ except ImportError:
     _LANGSMITH = False
 
 openai_client = OpenAI(api_key=OPENAI_KEY)
+aclient = AsyncOpenAI(api_key=OPENAI_KEY)
 
 # ── App ───────────────────────────────────────────────────────────────────────
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="Wander API",
     description="Your life isn't a chore; wander.",
     version="3.0.0",
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 FRONTEND_URL = os.getenv("FRONTEND_URL", "")
 _cors_origins = ["http://localhost:3000", "http://localhost:3001"]
 if FRONTEND_URL and FRONTEND_URL not in _cors_origins:
@@ -205,6 +214,7 @@ class WanderRouteOptionV3(BaseModel):
     waypoints: List[WaypointV3]
     navigation_deep_link: str
     estimated_total_cost_usd: Optional[int] = 0
+    route_polyline: Optional[List[List[float]]] = Field(None, description="Decoded lat/lng pairs for the full walking route path")
 
 
 
@@ -350,25 +360,21 @@ async def _get_weather(lat: float, lng: float) -> Optional[dict]:
 async def _extract_custom_queries(vibe: str) -> List[str]:
     """Use GPT-4o-mini to extract search keywords from a user's custom vibe text."""
     try:
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are an assistant that extracts specific Google Maps Places search terms from a descriptive vibe. "
-                            "Extract 3 to 5 distinct, concrete, search queries (e.g. 'bookstore', 'ramen', 'rooftop bar') matching the user's desires. "
-                            "Return ONLY a JSON object containing a 'queries' array of strings. Example: {'queries': ['query1', 'query2']}."
-                        )
-                    },
-                    {"role": "user", "content": vibe}
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.0
-            )
+        response = await aclient.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an assistant that extracts specific Google Maps Places search terms from a descriptive vibe. "
+                        "Extract 3 to 5 distinct, concrete, search queries (e.g. 'bookstore', 'ramen', 'rooftop bar') matching the user's desires. "
+                        "Return ONLY a JSON object containing a 'queries' array of strings. Example: {'queries': ['query1', 'query2']}."
+                    )
+                },
+                {"role": "user", "content": vibe}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.0
         )
         content = response.choices[0].message.content
         if content:
@@ -385,28 +391,24 @@ async def _extract_custom_queries(vibe: str) -> List[str]:
 async def _extract_lucky_queries() -> List[str]:
     """Generate a surprising, themed, and avant-garde set of Google Maps search queries for 'Feeling Lucky'."""
     try:
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are an urban exploration planner. The user clicked 'I'm Feeling Lucky'. "
-                            "Create a cohesive but completely unexpected, quirky, and themed set of 3 to 5 Google Maps search queries. "
-                            "Think of strange but delightful themes: a retro neon crawl, a botanical & vintage book drift, "
-                            "a speakeasy & historic mystery walk, or a vinyl record & coffee alleyway stroll. "
-                            "Be creative and specific with the search queries (e.g. 'independent bookstore', 'retro arcade bar', 'historic fountain overlook'). "
-                            "Return ONLY a JSON object containing a 'queries' array of strings. Example: {'queries': ['query1', 'query2', 'query3']}."
-                        )
-                    },
-                    {"role": "user", "content": "Generate a completely unique and surprising walk vibe theme and queries."}
-                ],
-                response_format={"type": "json_object"},
-                temperature=1.0
-            )
+        response = await aclient.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an urban exploration planner. The user clicked 'I'm Feeling Lucky'. "
+                        "Create a cohesive but completely unexpected, quirky, and themed set of 3 to 5 Google Maps search queries. "
+                        "Think of strange but delightful themes: a retro neon crawl, a botanical & vintage book drift, "
+                        "a speakeasy & historic mystery walk, or a vinyl record & coffee alleyway stroll. "
+                        "Be creative and specific with the search queries (e.g. 'independent bookstore', 'retro arcade bar', 'historic fountain overlook'). "
+                        "Return ONLY a JSON object containing a 'queries' array of strings. Example: {'queries': ['query1', 'query2', 'query3']}."
+                    )
+                },
+                {"role": "user", "content": "Generate a completely unique and surprising walk vibe theme and queries."}
+            ],
+            response_format={"type": "json_object"},
+            temperature=1.0
         )
         content = response.choices[0].message.content
         if content:
@@ -428,31 +430,27 @@ async def _fetch_location_trivia(location: str) -> List[str]:
     Designed to be fast (low max_tokens, temperature 0.8).
     Returns an empty list silently on any error so it never blocks the pipeline.
     """
-    if not openai_client:
+    if not aclient:
         return []
     city = location.split(",")[0].strip()  # Use broadest part (city name) for better facts
     try:
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You generate exactly 3 extremely short, slightly witty, and obscure local facts "
-                            "about a city or place. Each fact must be under 12 words. "
-                            "Avoid generic tourism facts. Prefer genuinely surprising or little-known details. "
-                            "Return ONLY a JSON object: {\"facts\": [\"fact1\", \"fact2\", \"fact3\"]}."
-                        )
-                    },
-                    {"role": "user", "content": f"Give me 3 obscure facts about: {city}"}
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.8,
-                max_tokens=120,
-            )
+        response = await aclient.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You generate exactly 3 extremely short, slightly witty, and obscure local facts "
+                        "about a city or place. Each fact must be under 12 words. "
+                        "Avoid generic tourism facts. Prefer genuinely surprising or little-known details. "
+                        "Return ONLY a JSON object: {\"facts\": [\"fact1\", \"fact2\", \"fact3\"]}."
+                    )
+                },
+                {"role": "user", "content": f"Give me 3 obscure facts about: {city}"}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.8,
+            max_tokens=120,
         )
         content = response.choices[0].message.content
         if content:
@@ -963,7 +961,7 @@ def build_maps_deep_link(
 
 # ── Single Route OpenAI generation (RAG mode) ──────────────────────────────────
 
-def _call_openai_single_route_sync(
+async def _call_openai_single_route_async(
     request: RouteRequest,
     venues: List[Dict],
     route_type_desc: str,
@@ -1157,7 +1155,7 @@ Active vibe / custom request: {request.vibe}"""
             description="The sum of estimated_cost_usd for all waypoints in this route.",
         )
 
-    response = openai_client.beta.chat.completions.parse(
+    response = await aclient.beta.chat.completions.parse(
         model="gpt-4o",
         messages=[
             {"role": "system", "content": system_prompt},
@@ -1302,6 +1300,18 @@ async def _enrich_route(
     for i, wp_obj in enumerate(waypoints):
         wp_obj.walk_to_next_mins = legs_info[i + 1]["duration_mins"] if i + 1 < len(legs_info) else 0
 
+    # Decode and concatenate all leg polylines for the full route path
+    all_polyline_points: List[List[float]] = []
+    try:
+        for leg in legs_info:
+            encoded = leg.get("polyline", "")
+            if encoded:
+                decoded = polyline.decode(encoded)  # returns list of (lat, lng) tuples
+                all_polyline_points.extend([list(pt) for pt in decoded])
+    except Exception as poly_err:
+        logger.warning(f"Polyline decode failed (non-critical): {poly_err}")
+        all_polyline_points = []
+
     # If avoid_slopes is requested, check the elevation profile of all legs in parallel
     if request.avoid_slopes:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -1356,6 +1366,7 @@ async def _enrich_route(
             [w.place_id for w in waypoints],
         ),
         estimated_total_cost_usd=estimated_total_cost_usd,
+        route_polyline=all_polyline_points if all_polyline_points else None,
     )
 
 
@@ -1374,7 +1385,9 @@ def root():
 
 
 @app.post("/api/generate-route")
-async def generate_route(request: RouteRequest):
+@limiter.limit("5/minute")
+async def generate_route(request: Request, body: RouteRequest):
+    request = body  # re-alias for internal use
     async def event_generator():
         try:
             # 0. Stops-vs-Budget Heuristic Check
@@ -1641,8 +1654,7 @@ async def generate_route(request: RouteRequest):
 
             async def _generate_one(idx: int, route_label: str, route_type_desc: str):
                 try:
-                    raw_route = await asyncio.to_thread(
-                        _call_openai_single_route_sync,
+                    raw_route = await _call_openai_single_route_async(
                         request,
                         venues,
                         route_type_desc,
@@ -1783,7 +1795,8 @@ async def reverse_geocode(lat: float, lng: float):
 
 
 @app.post("/api/pacing-advisor", response_model=AdvisorResponse)
-async def pacing_advisor(request: AdvisorRequest):
+@limiter.limit("20/minute")
+async def pacing_advisor(http_req: Request, request: AdvisorRequest):
     # Try geocoding start and end
     start_ll = await geocode_location(request.start_location)
     if not start_ll:
@@ -1868,31 +1881,27 @@ async def pacing_advisor(request: AdvisorRequest):
     )
 
     # Query OpenAI to get the advice
-    loop = asyncio.get_event_loop()
     try:
-        response = await loop.run_in_executor(
-            None,
-            lambda: openai_client.beta.chat.completions.parse(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Start Location: {request.start_location}\n"
-                            f"End Location: {request.end_location}\n"
-                            f"Distance: {dist_m:.1f} meters (direct line), base walk time: {base_walk_mins} minutes\n"
-                            f"Time Budget: {request.time_budget_minutes} minutes\n"
-                            f"Requested Stops: {request.num_stops}\n"
-                            f"Companion: {request.companion}\n"
-                            f"Local Time: {request.local_time or 'unknown'}\n"
-                            f"Current Weather: {weather_str}"
-                        )
-                    }
-                ],
-                response_format=AdvisorResponse,
-                temperature=0.2
-            )
+        response = await aclient.beta.chat.completions.parse(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Start Location: {request.start_location}\n"
+                        f"End Location: {request.end_location}\n"
+                        f"Distance: {dist_m:.1f} meters (direct line), base walk time: {base_walk_mins} minutes\n"
+                        f"Time Budget: {request.time_budget_minutes} minutes\n"
+                        f"Requested Stops: {request.num_stops}\n"
+                        f"Companion: {request.companion}\n"
+                        f"Local Time: {request.local_time or 'unknown'}\n"
+                        f"Current Weather: {weather_str}"
+                    )
+                }
+            ],
+            response_format=AdvisorResponse,
+            temperature=0.2
         )
         parsed = response.choices[0].message.parsed
         # If there's weather advice and weather is adverse, fill it
@@ -1968,7 +1977,7 @@ class RoutePivotRequest(BaseModel):
     index: int
 
 
-def _call_openai_single_venue_swap_sync(
+async def _call_openai_single_venue_swap_async(
     route: WanderRouteOptionV3,
     index: int,
     vibe: str,
@@ -2027,7 +2036,7 @@ Choose exactly ONE venue from the candidate list that is the best replacement fo
 Return the index (1-based) of your choice and write a local, warm, lowercased action description and a specific insider tip.
 Do not use capital letters or end sentences with periods. Write like a local who has lived here 10 years."""
 
-    response = openai_client.beta.chat.completions.parse(
+    response = await aclient.beta.chat.completions.parse(
         model="gpt-4o",
         messages=[
             {"role": "system", "content": system_prompt},
@@ -2039,7 +2048,7 @@ Do not use capital letters or end sentences with periods. Write like a local who
     return response.choices[0].message.parsed
 
 
-def _call_openai_single_venue_detour_sync(
+async def _call_openai_single_venue_detour_async(
     vibe: str,
     candidates: List[Dict],
     remaining_budget_usd: Optional[int] = 50
@@ -2073,7 +2082,7 @@ Prefer Foursquare places if they have a hot-and-new or popular vibe, or OpenTrip
 Return the index (1-based) of your choice and write a local, warm, lowercased action description and a specific insider tip.
 Do not use capital letters or end sentences with periods. Write like a local who has lived here 10 years."""
 
-    response = openai_client.beta.chat.completions.parse(
+    response = await aclient.beta.chat.completions.parse(
         model="gpt-4o",
         messages=[
             {"role": "system", "content": system_prompt},
@@ -2086,7 +2095,8 @@ Do not use capital letters or end sentences with periods. Write like a local who
 
 
 @app.post("/api/swap-waypoint", response_model=WanderRouteOptionV3)
-async def swap_waypoint(request: WaypointSwapRequest):
+@limiter.limit("10/minute")
+async def swap_waypoint(http_req: Request, request: WaypointSwapRequest):
     route = request.route
     index = request.index
     
@@ -2094,9 +2104,12 @@ async def swap_waypoint(request: WaypointSwapRequest):
         raise HTTPException(status_code=400, detail="Invalid waypoint index")
         
     target_wp = route.waypoints[index]
-    # Geocode fallbacks
-    lat = target_wp.lat or route.start_lat or 40.7580
-    lng = target_wp.lng or route.start_lng or -73.9855
+    # Geocode fallbacks — use route start coords, never hardcoded Manhattan
+    lat = target_wp.lat or route.start_lat
+    lng = target_wp.lng or route.start_lng
+    if lat is None or lng is None:
+        logger.warning("[SWAP] No coordinates for waypoint or route start — cannot search nearby venues")
+        raise HTTPException(status_code=400, detail="Could not determine location for swap search. Please try again.")
     
     # 1. Places queries centered at the target stop coordinate
     if request.custom_refinement:
@@ -2193,18 +2206,14 @@ async def swap_waypoint(request: WaypointSwapRequest):
         raise HTTPException(status_code=404, detail="No suitable swap candidates found nearby. Try a different request.")
         
     # 2. Select replacement with LLM
-    loop = asyncio.get_event_loop()
     try:
-        swapped_llm = await loop.run_in_executor(
-            None,
-            lambda: _call_openai_single_venue_swap_sync(
-                route,
-                index,
-                request.vibe,
-                request.custom_refinement,
-                candidates,
-                request.max_budget_usd
-            )
+        swapped_llm = await _call_openai_single_venue_swap_async(
+            route,
+            index,
+            request.vibe,
+            request.custom_refinement,
+            candidates,
+            request.max_budget_usd
         )
     except Exception as e:
         logger.error(f"Error calling swap LLM: {e}")
@@ -2321,8 +2330,9 @@ async def swap_waypoint(request: WaypointSwapRequest):
     return route
 
 
-@app.post("/api/vibe-detour", response_model=VibeDetourResponse)
-async def vibe_detour(request: VibeDetourRequest):
+@app.post("/api/vibe-detour")
+@limiter.limit("10/minute")
+async def vibe_detour(http_req: Request, request: VibeDetourRequest):
     lat = request.current_lat
     lng = request.current_lng
     vibe = request.vibe
@@ -2407,15 +2417,11 @@ async def vibe_detour(request: VibeDetourRequest):
         raise HTTPException(status_code=404, detail="No suitable detours found nearby. Keep walking!")
         
     # 2. Select with LLM
-    loop = asyncio.get_event_loop()
     try:
-        detour_llm = await loop.run_in_executor(
-            None,
-            lambda: _call_openai_single_venue_detour_sync(
-                vibe,
-                candidates,
-                request.remaining_budget_usd
-            )
+        detour_llm = await _call_openai_single_venue_detour_async(
+            vibe,
+            candidates,
+            request.remaining_budget_usd
         )
     except Exception as e:
         logger.error(f"Error calling detour LLM: {e}")
@@ -2560,4 +2566,34 @@ async def pivot_route(request: RoutePivotRequest):
     return route
 
 
+# ── Stop Rating Feedback ───────────────────────────────────────────────────────
 
+class StopRatingRequest(BaseModel):
+    route_id: str
+    stop_name: str
+    rating: str  # "up" or "down"
+    vibe: str
+    address: Optional[str] = None
+
+
+@app.post("/api/rate-stop")
+async def rate_stop(request_data: StopRatingRequest):
+    """Accept a thumbs up/down rating for a stop. Appends to ratings.jsonl for future analysis."""
+    if request_data.rating not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="rating must be 'up' or 'down'")
+    rating_entry = {
+        "timestamp": time.time(),
+        "route_id": request_data.route_id,
+        "stop_name": request_data.stop_name,
+        "rating": request_data.rating,
+        "vibe": request_data.vibe,
+        "address": request_data.address,
+    }
+    try:
+        ratings_path = Path(__file__).parent / "ratings.jsonl"
+        with open(ratings_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rating_entry) + "\n")
+        logger.info(f"[RATING] {request_data.stop_name}: {request_data.rating} (vibe={request_data.vibe})")
+    except Exception as e:
+        logger.warning(f"Failed to write rating: {e}")
+    return {"status": "ok"}

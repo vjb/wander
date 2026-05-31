@@ -1,0 +1,16 @@
+feat: user history, real polylines, thumbs rating, AsyncOpenAI, rate limiting, locateError UX, feedback modal
+
+- Backend: AsyncOpenAI (aclient) replaces all run_in_executor thread-pool patterns
+- Backend: slowapi rate limiting on generate-route, swap-waypoint, vibe-detour, pacing-advisor
+- Backend: route_polyline field added to WanderRouteOptionV3 (decoded lat/lng pairs from Google Directions)
+- Backend: Manhattan coordinate fallback removed from swap_waypoint (uses route.start_lat/lng or 400s)
+- Backend: /api/rate-stop endpoint for thumbs up/down feedback (appends to ratings.jsonl)
+- Frontend: useWanderHistory hook (localStorage, last 10 wanders, rating persistence)
+- Frontend: wander history panel in InputScreen header
+- Frontend: thumbs up/down buttons on WaypointCard
+- Frontend: post-walk feedback modal after walk completion
+- Frontend: real polyline in WanderMap (route_polyline from API, falls back to dashed lines)
+- Frontend: locateError state with specific user-friendly messages for each geolocation error code
+- Frontend: /api/rate-stop Next.js proxy route
+- Docs: ai_design.md updated for async refactor, rate limiting, feedback loop
+- Docs: README.md fully rewritten with all new features documented

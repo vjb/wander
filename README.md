@@ -4,15 +4,17 @@
 
 > *the shortest path isn't the point.*
 
-An AI-powered urban walking itinerary generator. Give it a start, an end, a time budget, and a vibe — it streams three distinct curated routes back to you in real time, complete with venue photos, insider tips, live walk mode, and a spontaneous detour button for when the plan should change.
+An AI-powered urban walking itinerary generator. Give it a start, an end, a time budget, and a vibe — it streams three distinct curated routes back to you in real time, complete with venue photos, insider tips, a real walking-route map, live walk mode, and a spontaneous detour button for when the plan should change.
 
 ---
 
 ## Screenshots
 
-### Home
+### Home — Smart Input Form
 
-![The wander home form — dark glassmorphic UI with start/end inputs, time budget slider, and vibe selector](./wander-ui/public/screenshots/01_home.png)
+The main input screen with hero tagline, start/end location fields with GPS locate button, and the **history** button to revisit past wanders.
+
+![The wander home form — dark glassmorphic UI with start/end inputs, time budget slider, and vibe selector](./docs/screenshots/hero_input.png)
 
 ### Pick Your Vibe
 
@@ -38,48 +40,55 @@ Routes stream via SSE the moment each one finishes. The first tab auto-selects a
 
 Each route gets its own vibe-specific archetype name, with metadata badges for walk time, stop time, estimated spend, step count, calories, and live weather.
 
-![Three route tabs — "Serene Sunday Stroll", "Serenity Stroll", "Urban Zen Stroll" — with metadata badges showing 19 min walking, 95 min at stops, $5 est. spend, 2,280 steps, and clouds 24°C](./wander-ui/public/screenshots/06_routes.png)
+![Three route tabs with metadata badges showing walk time, stops, spend, steps, and weather](./docs/screenshots/route_screen.png)
 
-### Waypoint Cards with Insider Tips
+### Real Walking-Route Map
 
-Every stop has a Google Places photo, star rating, vibe-category pill, description, time estimate, cost, street view link — and a permanently visible **Insider Tip** sourced from the AI concierge. Swap any stop for a surprise replacement or describe exactly what you want instead.
+A CARTO dark-mode Leaflet map now draws the **actual street-following route polyline** from Google Directions — no more dashed straight lines. Stop markers are numbered, destination pulses. Tap any marker for a popup with directions, Street View, and the stop summary.
 
-![Waypoint card for "787 coffee" showing photo, rating 4.9, address, description, 20 min / $5, Street View link, swap stop button, and an insider tip: "Try their signature iced coquito latte for a refreshing twist"](./wander-ui/public/screenshots/07_waypoint.png)
+![CARTO dark map of Manhattan with numbered stop markers connected by a real walking-path polyline](./docs/screenshots/route_screen.png)
 
-### Route Map
+### Waypoint Cards with Thumbs Rating
 
-A CARTO dark-mode Leaflet map plots every stop with numbered markers. The destination marker pulses. Tap any marker for a popup with directions, Street View, and the stop summary.
+Every stop has a Google Places photo, star rating, vibe-category pill, description, time estimate, cost, street view link, and a permanently visible **Insider Tip**. You can also rate any stop thumbs up/down right on the card — or swap it for something better.
 
-![CARTO dark map of Manhattan with numbered stop markers (S, 1, 2, D) connected by a dashed route line, with plan another wander / share this wander / add to calendar actions below](./wander-ui/public/screenshots/08_map.png)
+![Waypoint card showing photo, rating, description, thumbs up/down rating buttons, and swap stop button](./docs/screenshots/waypoint_card.png)
+
+### Wander History
+
+Hit the **history** button in the header to see your last 10 wanders — route names, start/end, vibe, and date. Past ratings are preserved.
+
+![History panel dropdown showing recent wanders with route names and dates](./docs/screenshots/history_panel.png)
 
 ### Spontaneous Detour
 
 Mid-walk, tap the **detour me** button. The AI surfaces a nearby off-route gem with its own insider tip. Choose to keep walking or **pivot route** — which rebuilds the remaining itinerary around the detour stop.
 
-![Spontaneous Detour modal showing "Morosco Theatre" on 7th Avenue Manhattan with a Theatre Escape tag, insider tip about arriving early, and KEEP WALKING / PIVOT ROUTE CTAs](./wander-ui/public/screenshots/09_detour.png)
+![Spontaneous Detour modal showing a nearby hidden gem with insider tip and KEEP WALKING / PIVOT ROUTE CTAs](./wander-ui/public/screenshots/09_detour.png)
 
 ---
 
 ## How It Works
 
 ```
-User fills form  →  POST /api/generate-route
+User fills form  →  POST /api/generate-route (5/min rate limit)
                           │
                     SSE stream opens
                           │
              ┌────────────┼────────────────────┐
              │            │                    │
-      trivia_task   geocode + weather    venue search
-    (gpt-4o-mini)   (Google APIs)      (Places API)
+       trivia_task   geocode + weather    venue search
+     (gpt-4o-mini)   (Google APIs)      (Places API)
              │            │                    │
              └────────────┴─► "did you know: …" status events
                           │
-                   3 parallel LLM calls (gpt-4o)
-                   each routes to a unique archetype
+                   3 parallel async LLM calls (gpt-4o)
+                   each routed to a unique archetype
                           │
               route 1 done → SSE → frontend shows tab 1
               route 2 done → SSE → tab 2 unlocks
               route 3 done → SSE → tab 3 unlocks + 🎉 confetti
+              done event  → history saved + feedback modal
 ```
 
 1. **Configure** — Enter start + end (or loop), time budget (30 min–4 hr) or step goal, pick a vibe or write your own. Advanced filters let you set stop count, max budget, free-stops preference, slope avoidance, and companion.
@@ -92,6 +101,8 @@ User fills form  →  POST /api/generate-route
 
 5. **Pivot anytime** — The **detour me** button surfaces a nearby gem with an insider tip. Keep walking or pivot the rest of your route around it.
 
+6. **Rate your stops** — After your walk, a feedback modal lets you thumbs up/down each stop. Ratings are stored locally (wander history) and sent to the backend for future learning.
+
 ---
 
 ## Features
@@ -100,12 +111,14 @@ User fills form  →  POST /api/generate-route
 | Feature | Detail |
 |---|---|
 | **Real-time SSE streaming** | Routes arrive as each finishes — no waiting for all 3 |
+| **AsyncOpenAI** | All 3 parallel LLM calls use `AsyncOpenAI` — true async I/O, no thread pool |
 | **3 parallel route archetypes** | Vibe-specific themes (e.g. Mental Break → "Serene Sunday Stroll", "Urban Zen Stroll") |
 | **Venue RAG pipeline** | Up to 25 top-rated, geographically-sorted candidates fed to LLM |
 | **Feasibility guard** | Pacing advisor rejects impossible budgets before generation |
 | **Round-trip / loop support** | `make it a loop` locks start = end with adjusted radius |
 | **Step goal mode** | Alternative to time budget — enter a daily step target |
 | **Geometry validation** | Routes that would require >85% of budget just walking are rejected |
+| **Rate limiting** | 5 req/min on generate, 10/min on swap and detour (slowapi) |
 
 ### Vibes
 | Vibe | Route Archetypes |
@@ -126,6 +139,12 @@ User fills form  →  POST /api/generate-route
 - **Remaining time estimate** — recalculates dynamically as you check stops off
 - **Stops-without-GPS warning** — flags stops that can't auto-glow
 
+### Real Walking-Route Map
+- **Street-following polyline** — Google Directions decodes the actual walking path; route_polyline is decoded and sent to the frontend
+- **Fallback** — if Directions API has no polyline, dashed straight-line between pins
+- **Rich popups** — click any pin for open-in-maps, street view, rating, and address
+- **Re-center button** — tap to snap map back to route bounds
+
 ### Waypoint Cards
 - Google Places photo banner (lazy-loaded, graceful fallback)
 - Star rating + vibe-category pill
@@ -133,7 +152,18 @@ User fills form  →  POST /api/generate-route
 - Duration estimate + estimated spend
 - **Insider Tip** — always visible, concierge-style local knowledge
 - **Swap Stop** — replace with "surprise me" or custom refinement text ("something with a rooftop")
+- **Thumbs up/down rating** — instant visual feedback, saved locally + sent to backend
 - Street View deep-link
+
+### User History
+- **Recent wanders panel** — last 10 wanders stored in `localStorage`
+- **Route details** — name, start/end, vibe, date, and stop list per wander
+- **Rating persistence** — thumbs ratings survive page refreshes
+
+### Geolocation UX
+- **Friendly error messages** — `PERMISSION_DENIED` gets a specific guidance message ("enable in browser settings or type your starting point")
+- **Timeout handling** — 8-second timeout with helpful fallback message
+- **Amber warning bar** — non-modal inline error below the locate button, never interrupts
 
 ### Smart Loading
 - **Dynamic trivia** — location-aware facts from `gpt-4o-mini` stream during load via SSE
@@ -145,6 +175,7 @@ User fills form  →  POST /api/generate-route
 - **Add to calendar** — exports itinerary as a calendar event
 - **Plan another wander** — resets to form with preferences remembered
 - **Spontaneous Detour** — mid-walk modal with nearby gem + pivot option
+- **Post-walk feedback modal** — rate every stop thumbs up/down after completing a wander
 
 ### Accessibility & UX
 - **Comfort Mode** (`Aa` button) — bumps all text to 18px base, larger icons, min 44px tap targets
@@ -160,25 +191,35 @@ User fills form  →  POST /api/generate-route
 ```
 wander/
 ├── wander-api/          # FastAPI + SSE backend
-│   ├── main.py          # All routes, LLM calls, SSE generator
+│   ├── main.py          # All routes, AsyncOpenAI LLM calls, SSE generator
+│   ├── database.py      # Share URL storage
+│   ├── ratings.jsonl    # Stop rating feedback log (auto-created)
 │   └── tests/
 │       ├── test_ghost_fixes.py
 │       └── test_parallel_generation.py
+├── docs/
+│   ├── ai_design.md         # Full LLM design doc — every prompt, model, temp
+│   ├── business_plan.md
+│   ├── market_size_presentation.md
+│   └── vc_one_pager.md
 └── wander-ui/           # Next.js 16 (App Router)
     ├── app/
     │   ├── page.tsx     # Main app (input → loading → routes)
     │   ├── globals.css  # Wander design tokens + animations
     │   ├── layout.tsx   # Playfair Display + Inter fonts
     │   ├── hooks/
-    │   │   ├── useWalkMode.ts    # GPS, dwell timer, check-in logic
-    │   │   └── useWanderMemory.ts # localStorage preference persistence
-    │   ├── api/
-    │   │   ├── generate-route/  # Next.js proxy → FastAPI SSE
-    │   │   ├── shares/          # Share URL creation
-    │   │   └── pacing-advisor/  # Pre-generation feasibility check
-    │   └── r/[id]/              # Shared route view
+    │   │   ├── useWalkMode.ts        # GPS, dwell timer, check-in logic
+    │   │   ├── useWanderHistory.ts   # localStorage history + ratings
+    │   │   └── usePreferences.ts     # Preference memory across sessions
+    │   ├── components/
+    │   │   └── WanderMap.tsx         # Leaflet map + real polyline rendering
+    │   └── api/
+    │       ├── generate-route/       # Next.js proxy → FastAPI SSE
+    │       ├── rate-stop/            # Stop rating feedback proxy
+    │       ├── shares/               # Share URL creation
+    │       └── pacing-advisor/       # Pre-generation feasibility check
     └── public/
-        └── screenshots/         # README screenshots
+        └── screenshots/              # README screenshots
 ```
 
 ### Tech Stack
@@ -186,13 +227,28 @@ wander/
 |---|---|
 | Frontend | Next.js 16 (App Router), React 19 |
 | Styling | Tailwind CSS v4, Framer Motion |
-| Maps | Leaflet + react-leaflet (CARTO dark tiles) |
-| Backend | FastAPI, Python 3.11 |
+| Maps | Leaflet (CARTO dark tiles) + real polyline from Directions API |
+| Backend | FastAPI, Python 3.12 |
 | Streaming | Server-Sent Events (SSE) |
-| LLM | OpenAI gpt-4o (routes) + gpt-4o-mini (trivia, vibe parsing) |
-| Venues | Google Places API (Nearby Search) |
-| Geocoding | Google Maps Geocoding + Directions API |
+| LLM | `AsyncOpenAI` — gpt-4o (routes/swap/detour) + gpt-4o-mini (trivia, vibe parsing, advisor) |
+| Rate Limiting | slowapi (per-IP, per-endpoint) |
+| Venues | Google Places API (Text Search + Nearby) + Foursquare + OpenTripMap |
+| Geocoding | Google Maps Geocoding + Directions API (walking times + polylines) |
 | Weather | OpenWeatherMap API |
+
+---
+
+## AI Design
+
+See **[docs/ai_design.md](./docs/ai_design.md)** for the complete LLM walkthrough — every prompt, model, temperature, structured output schema, and the data flow pipeline. Includes:
+
+- Why each model was chosen for each task
+- Full system and user prompt text for all 7 LLM calls
+- The RAG venue pipeline with progression scoring
+- Cost estimate (~$0.21 per route generation)
+- Async architecture notes (why `AsyncOpenAI` vs `run_in_executor`)
+- Rate limiting configuration
+- Feedback loop design (ratings.jsonl → future RAG weighting)
 
 ---
 
