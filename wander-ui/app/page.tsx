@@ -1100,7 +1100,7 @@ function WaypointCard({
       transition={{ type: "spring", stiffness: 300, damping: 20 }}
     >
       <div
-        className={`glass-lighter rounded-2xl overflow-hidden relative transition-all duration-500 ${
+        className={`glass-lighter rounded-2xl relative transition-all duration-500 ${
           isVisited ? "opacity-50" : ""
         } ${
           isNearby && !isVisited

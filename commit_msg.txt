@@ -1,1 +1,9 @@
-docs: update README with 5 fresh screenshots from live app (route_screen, waypoint_card, history_panel, vibe_detour, hero_input)
+fix: swap panel overflow-hidden clip + OTM wiki contaminating insider tips
+
+- Frontend: removed overflow-hidden from WaypointCard outer wrapper so the swap
+  panel animates open correctly within the card bounds. Photo banner retains its
+  own overflow-hidden for the image crop.
+- Backend: removed OTM Wikipedia extract append from insider_tip in all 3
+  enrichment blocks (enrich_route, swap_waypoint, vibe_detour). OTM wiki often
+  returns non-English text (Cebuano, etc.) which pollutes the LLM-written tip.
+  Wikipedia extract is still fetched but only used for photo/address enrichment.

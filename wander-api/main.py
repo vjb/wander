@@ -1241,9 +1241,9 @@ async def _enrich_route(
                     if prefix and suffix:
                         photo_url = f"{prefix}800x500{suffix}"
             elif provider == "otm":
+                # Wikipedia extract: use for photo/address only — NOT for insider tip
+                # (OTM wiki often returns non-English text or generic encyclopedia prose)
                 wiki = data.get("wikipedia_extracts", {}).get("text", "")
-                if wiki:
-                    insider_tip = f"{insider_tip} (about: {wiki[:220].rstrip('.') if len(wiki) > 220 else wiki.rstrip('.')})"
                 addr_info = data.get("address", {})
                 if addr_info:
                     road = addr_info.get("road", "")
@@ -2268,8 +2268,7 @@ async def swap_waypoint(http_req: Request, request: WaypointSwapRequest):
         otm_details = await _opentripmap_get_details(xid)
         if otm_details:
             wiki = otm_details.get("wikipedia_extracts", {}).get("text", "")
-            if wiki:
-                insider_tip = f"{insider_tip} (about: {wiki[:220].rstrip('.') if len(wiki) > 220 else wiki.rstrip('.')})"
+            # Wikipedia extract: skip — often non-English; keep LLM tip clean
             addr_info = otm_details.get("address", {})
             if addr_info:
                 road = addr_info.get("road", "")
@@ -2477,8 +2476,7 @@ async def vibe_detour(http_req: Request, request: VibeDetourRequest):
         otm_details = await _opentripmap_get_details(xid)
         if otm_details:
             wiki = otm_details.get("wikipedia_extracts", {}).get("text", "")
-            if wiki:
-                insider_tip = f"{insider_tip} (about: {wiki[:220].rstrip('.') if len(wiki) > 220 else wiki.rstrip('.')})"
+            # Wikipedia extract: skip — often non-English; keep LLM tip clean
             addr_info = otm_details.get("address", {})
             if addr_info:
                 road = addr_info.get("road", "")
