@@ -32,7 +32,7 @@ Stop count, max budget per person, free-stops-only toggle, slope avoidance, and 
 
 While GPT-4o builds your routes, the backend fires a concurrent `gpt-4o-mini` call to fetch obscure facts about your starting location. They stream in as `did you know:` SSE events — fading in with AnimatePresence as the route generates.
 
-![Minimal loading screen showing "did you know: Times Square's original name was Longacre Square." in elegant italic serif font](./wander-ui/public/screenshots/05_loading.png)
+![Minimal loading screen showing a did you know fact in elegant italic serif font](./wander-ui/public/screenshots/05_loading.png)
 
 ### Three Routes, Streaming In
 
@@ -40,19 +40,19 @@ Routes stream via SSE the moment each one finishes. The first tab auto-selects a
 
 Each route gets its own vibe-specific archetype name, with metadata badges for walk time, stop time, estimated spend, step count, calories, and live weather.
 
-![Three route tabs with metadata badges showing walk time, stops, spend, steps, and weather](./docs/screenshots/route_screen.png)
+![Three route tabs with metadata badges showing walk time, stops, spend, steps, and weather](./wander-ui/public/screenshots/06_routes.png)
 
 ### Real Walking-Route Map
 
 A CARTO dark-mode Leaflet map now draws the **actual street-following route polyline** from Google Directions — no more dashed straight lines. Stop markers are numbered, destination pulses. Tap any marker for a popup with directions, Street View, and the stop summary.
 
-![CARTO dark map of Manhattan with numbered stop markers connected by a real walking-path polyline](./docs/screenshots/route_screen.png)
+![CARTO dark map with numbered stop markers connected by a real walking-path polyline](./wander-ui/public/screenshots/08_map.png)
 
 ### Waypoint Cards with Thumbs Rating
 
 Every stop has a Google Places photo, star rating, vibe-category pill, description, time estimate, cost, street view link, and a permanently visible **Insider Tip**. You can also rate any stop thumbs up/down right on the card — or swap it for something better.
 
-![Waypoint card showing photo, rating, description, thumbs up/down rating buttons, and swap stop button](./docs/screenshots/waypoint_card.png)
+![Waypoint card showing photo, rating, description, thumbs up/down rating buttons, and swap stop button](./wander-ui/public/screenshots/07_waypoint.png)
 
 ### Wander History
 
