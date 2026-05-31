@@ -932,6 +932,44 @@ function LoadingScreen({ message }: { message: string }) {
   );
 }
 
+// ── Waypoint Vibe Theme Style Helper ──
+const getVibeStyle = (vibeTag: string) => {
+  const t = vibeTag.toLowerCase();
+  if (t.includes("scenic") || t.includes("green") || t.includes("park") || t.includes("garden") || t.includes("nature") || t.includes("outdoor")) {
+    return {
+      gradient: "from-[#8ba88e]/20 to-[#1b221c]",
+      iconColor: "text-[#8ba88e]/20",
+      icon: Leaf,
+    };
+  }
+  if (t.includes("coffee") || t.includes("cafe") || t.includes("culture") || t.includes("caffeinated") || t.includes("art") || t.includes("museum") || t.includes("book") || t.includes("library") || t.includes("historic") || t.includes("history")) {
+    return {
+      gradient: "from-[#e5d3b3]/25 to-[#221e1b]",
+      iconColor: "text-[#e5d3b3]/20",
+      icon: Coffee,
+    };
+  }
+  if (t.includes("social") || t.includes("playful") || t.includes("adventurous") || t.includes("fun") || t.includes("games") || t.includes("nightlife") || t.includes("bar") || t.includes("drinks") || t.includes("pub")) {
+    return {
+      gradient: "from-[#e2cc8f]/20 to-[#22211b]",
+      iconColor: "text-[#e2cc8f]/20",
+      icon: Zap,
+    };
+  }
+  if (t.includes("quiet") || t.includes("retreat") || t.includes("mental") || t.includes("break") || t.includes("peaceful") || t.includes("serene")) {
+    return {
+      gradient: "from-[#8ba88e]/15 to-[#131316]",
+      iconColor: "text-[#8ba88e]/15",
+      icon: Timer,
+    };
+  }
+  return {
+    gradient: "from-[#8ba88e]/12 to-[#131316]",
+    iconColor: "text-[#8ba88e]/10",
+    icon: Sparkles,
+  };
+};
+
 // ── Waypoint Card ─────────────────────────────────────────────────────────────
 
 function WaypointCard({
@@ -957,6 +995,7 @@ function WaypointCard({
   const [swapMenuOpen, setSwapMenuOpen] = useState(false);
   const [customInput, setCustomInput] = useState("");
   const [copied, setCopied] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   useEffect(() => {
     if (!swapMenuOpen) return;
@@ -1005,14 +1044,15 @@ function WaypointCard({
           </div>
         )}
 
-        {/* ── Photo Banner ── */}
-        {waypoint.photo_url && (
-          <div className="relative w-full h-40 overflow-hidden">
+        {/* ── Photo Banner or Fallback ── */}
+        {waypoint.photo_url && !imageError ? (
+          <div className="relative w-full h-40 overflow-hidden bg-[#131316]">
             <img
               src={waypoint.photo_url}
               alt={waypoint.location_name}
               className="w-full h-full object-cover"
               loading="lazy"
+              onError={() => setImageError(true)}
             />
             {/* gradient fade into card background */}
             <div
@@ -1038,48 +1078,59 @@ function WaypointCard({
               </span>
             )}
           </div>
+        ) : (
+          (() => {
+            const vs = getVibeStyle(waypoint.vibe_tag || "");
+            const FallbackIcon = vs.icon;
+            return (
+              <div className={`relative w-full h-40 bg-gradient-to-br ${vs.gradient} flex items-center justify-center overflow-hidden`}>
+                <FallbackIcon className={`w-14 h-14 ${vs.iconColor}`} strokeWidth={1.2} />
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    background: "linear-gradient(to bottom, transparent 40%, #131316 100%)",
+                  }}
+                />
+                {/* vibe tag floated */}
+                <span
+                  className="absolute top-3 left-3 inline-block px-2.5 py-0.5 rounded-full bg-[#131316]/70 backdrop-blur-sm text-[#8ba88e] text-[10px] font-medium tracking-wider uppercase"
+                  style={{ fontFamily: "var(--font-inter)" }}
+                >
+                  {waypoint.vibe_tag}
+                </span>
+                {/* rating floated */}
+                {waypoint.google_rating != null && (
+                  <span
+                    className="absolute top-3 right-3 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#131316]/70 backdrop-blur-sm text-[#e5d3b3] text-[11px] font-medium"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                  >
+                    ★ {waypoint.google_rating.toFixed(1)}
+                  </span>
+                )}
+              </div>
+            );
+          })()
         )}
 
         <div className="p-5">
-          {/* vibe tag — only shown when no photo (photo shows it above) */}
-          {!waypoint.photo_url && (
-            <span
-              className="inline-block px-2.5 py-0.5 rounded-full bg-[#8ba88e]/10 text-[#8ba88e] text-[10px] font-medium tracking-wider uppercase mb-3"
-              style={{ fontFamily: "var(--font-inter)" }}
-            >
-              {waypoint.vibe_tag}
-            </span>
-          )}
-
           <div className="flex items-start justify-between gap-2 mb-1">
-            {waypoint.place_id ? (
-              <a
-                href={`https://www.google.com/maps/place/?q=place_id:${waypoint.place_id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[#f4f4f5] hover:text-[#8ba88e] transition-colors text-xl font-semibold leading-tight flex items-center gap-2 group"
-                style={{ fontFamily: "var(--font-playfair)" }}
-              >
-                {waypoint.location_name}
-                <ExternalLink className="w-4 h-4 shrink-0 text-[#f4f4f5]/30 group-hover:text-[#8ba88e] transition-colors" strokeWidth={1.5} />
-              </a>
-            ) : (
-              <h3
-                className="text-[#f4f4f5] text-xl font-semibold leading-tight"
-                style={{ fontFamily: "var(--font-playfair)" }}
-              >
-                {waypoint.location_name}
-              </h3>
-            )}
-            {/* rating badge — only shown when no photo (photo shows it above) */}
-            {!waypoint.photo_url && waypoint.google_rating != null && (
-              <span
-                className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#e5d3b3]/8 border border-[#e5d3b3]/15 text-[#e5d3b3]/70 text-[11px] font-medium mt-1"
-                style={{ fontFamily: "var(--font-inter)" }}
-              >
-                ★ {waypoint.google_rating.toFixed(1)}
-              </span>
-            )}
+            {(() => {
+              const mapsUrl = waypoint.place_id && !waypoint.place_id.startsWith("otm:") && !waypoint.place_id.startsWith("fsq:")
+                ? `https://www.google.com/maps/place/?q=place_id:${waypoint.place_id}`
+                : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(waypoint.location_name + ", " + (waypoint.address_hint || ""))}`;
+              return (
+                <a
+                  href={mapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#f4f4f5] hover:text-[#8ba88e] transition-colors text-xl font-semibold leading-tight flex items-center gap-2 group"
+                  style={{ fontFamily: "var(--font-playfair)" }}
+                >
+                  {waypoint.location_name}
+                  <ExternalLink className="w-4 h-4 shrink-0 text-[#f4f4f5]/30 group-hover:text-[#8ba88e] transition-colors" strokeWidth={1.5} />
+                </a>
+              );
+            })()}
           </div>
           <button
             onClick={async () => {
@@ -1530,6 +1581,12 @@ export function RouteScreen({
   const [routes, setRoutes] = useState<WanderRouteOptionV3[]>(data.routes || []);
   const [swappingIndex, setSwappingIndex] = useState<number | null>(null);
 
+  const [isFetchingDetour, setIsFetchingDetour] = useState(false);
+  const [detourWaypoint, setDetourWaypoint] = useState<any | null>(null);
+  const [detourWalkMins, setDetourWalkMins] = useState<number | null>(null);
+  const [detourModalOpen, setDetourModalOpen] = useState(false);
+  const [detourImageError, setDetourImageError] = useState(false);
+
   useEffect(() => {
     if (data?.routes) {
       setRoutes(data.routes);
@@ -1660,6 +1717,7 @@ export function RouteScreen({
 
   const {
     walkModeActive,
+    userPosition,
     proximityStopIdx,
     checkedInStops,
     dwellSeconds,
@@ -1671,6 +1729,159 @@ export function RouteScreen({
     geoError,
     stopsWithoutCoords,
   } = useWalkMode(walkWaypoints, handleCheckIn);
+
+  const handleTriggerDetour = async () => {
+    if (!activeRoute) return;
+    setIsFetchingDetour(true);
+    setDetourWaypoint(null);
+    setDetourWalkMins(null);
+    setDetourImageError(false);
+    
+    let lat: number | null = userPosition?.lat ?? null;
+    let lng: number | null = userPosition?.lng ?? null;
+
+    if (lat === null || lng === null) {
+      if (navigator.geolocation) {
+        try {
+          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 5000
+            });
+          });
+          lat = pos.coords.latitude;
+          lng = pos.coords.longitude;
+        } catch (e) {
+          console.warn("Could not retrieve GPS coordinates for detour, falling back to active route start location or default Manhattan", e);
+        }
+      }
+    }
+
+    if (lat === null || lng === null) {
+      lat = activeRoute.start_lat ?? activeRoute.waypoints[0]?.lat ?? 40.7128;
+      lng = activeRoute.start_lng ?? activeRoute.waypoints[0]?.lng ?? -74.0060;
+    }
+
+    try {
+      const res = await fetch("/api/vibe-detour", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lat,
+          lng,
+          vibe: vibe || "custom",
+          max_budget_usd: maxBudget,
+          current_itinerary_place_ids: activeRoute.waypoints.map(w => w.place_id).filter(Boolean)
+        })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setDetourWaypoint(d.waypoint);
+        setDetourWalkMins(d.walk_to_detour_mins);
+        setDetourModalOpen(true);
+      } else {
+        const err = await res.json();
+        alert(err.detail || "No suitable detours found nearby.");
+      }
+    } catch (err) {
+      console.error("Error triggering detour:", err);
+      alert("Failed to find a detour stop nearby.");
+    } finally {
+      setIsFetchingDetour(false);
+    }
+  };
+
+  const handlePivotRoute = async () => {
+    if (!activeRoute || !detourWaypoint) return;
+    const indexToSwap = currentStopIdx < activeRoute.waypoints.length ? currentStopIdx : activeRoute.waypoints.length - 1;
+    if (indexToSwap < 0) return;
+    
+    try {
+      const res = await fetch("/api/pivot-route", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          route: activeRoute,
+          detour_waypoint: detourWaypoint,
+          index: indexToSwap
+        })
+      });
+      if (res.ok) {
+        const updatedRoute = await res.json();
+        setRoutes((prevRoutes) => {
+          const next = [...prevRoutes];
+          next[selectedIndex] = updatedRoute;
+          return next;
+        });
+        setDetourModalOpen(false);
+      } else {
+        const err = await res.json();
+        alert(err.detail || "Failed to pivot route");
+      }
+    } catch (err) {
+      console.error("Error pivoting route:", err);
+      alert("Failed to pivot route.");
+    }
+  };
+
+  // Device shake listener for spontaneous detour
+  useEffect(() => {
+    if (!walkModeActive) return;
+
+    let lastX: number | null = null;
+    let lastY: number | null = null;
+    let lastZ: number | null = null;
+    let lastUpdate = 0;
+    const SHAKE_THRESHOLD = 15; // sensitivity threshold
+
+    const handleMotion = (event: DeviceMotionEvent) => {
+      const acceleration = event.accelerationIncludingGravity;
+      if (!acceleration) return;
+
+      const currTime = Date.now();
+      if (currTime - lastUpdate > 100) {
+        const diffTime = currTime - lastUpdate;
+        lastUpdate = currTime;
+
+        const x = acceleration.x ?? 0;
+        const y = acceleration.y ?? 0;
+        const z = acceleration.z ?? 0;
+
+        if (lastX !== null && lastY !== null && lastZ !== null) {
+          const speed = (Math.abs(x + y + z - lastX - lastY - lastZ) / diffTime) * 10000;
+          if (speed > SHAKE_THRESHOLD) {
+            // Trigger detour if not already loading or open
+            if (!isFetchingDetour && !detourModalOpen) {
+              handleTriggerDetour();
+            }
+          }
+        }
+        lastX = x;
+        lastY = y;
+        lastZ = z;
+      }
+    };
+
+    if (
+      typeof window !== "undefined" &&
+      typeof (DeviceMotionEvent as any).requestPermission === "function"
+    ) {
+      (DeviceMotionEvent as any)
+        .requestPermission()
+        .then((permissionState: string) => {
+          if (permissionState === "granted") {
+            window.addEventListener("devicemotion", handleMotion);
+          }
+        })
+        .catch(console.error);
+    } else {
+      window.addEventListener("devicemotion", handleMotion);
+    }
+
+    return () => {
+      window.removeEventListener("devicemotion", handleMotion);
+    };
+  }, [walkModeActive, isFetchingDetour, detourModalOpen, userPosition]);
 
   const handleShare = async () => {
     if (!activeRoute) return;
@@ -2105,11 +2316,9 @@ export function RouteScreen({
             className="mb-8 flex items-center gap-2 flex-wrap justify-center"
           >
             {activeRoute.waypoints.map((wp) => {
-              const href = wp.place_id
+              const href = wp.place_id && !wp.place_id.startsWith("otm:") && !wp.place_id.startsWith("fsq:")
                 ? `https://www.google.com/maps/place/?q=place_id:${wp.place_id}`
-                : (wp.lat != null && wp.lng != null)
-                ? `https://www.google.com/maps/search/?api=1&query=${wp.lat},${wp.lng}`
-                : null;
+                : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(wp.location_name + ", " + (wp.address_hint || ""))}`;
               const badge = (
                 <span
                   className="w-7 h-7 rounded-full bg-[#8ba88e]/15 border border-[#8ba88e]/30 flex items-center justify-center text-[#8ba88e] text-[11px] font-semibold transition-all duration-200"
@@ -2339,6 +2548,28 @@ export function RouteScreen({
                 </motion.button>
               )}
 
+              {/* Detour Me Button */}
+              {!isSharedView && walkModeActive && (
+                <motion.button
+                  id="detour-me-button"
+                  onClick={handleTriggerDetour}
+                  disabled={isFetchingDetour}
+                  whileHover={{ scale: 1.015 }}
+                  whileTap={{ scale: 0.985 }}
+                  transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                  className="shrink-0 py-4 px-4 rounded-2xl bg-[#e5d3b3]/10 border border-[#e5d3b3]/25 text-[#e5d3b3] hover:bg-[#e5d3b3]/20 animate-pulse shadow-[0_0_15px_rgba(229,211,179,0.3)] transition-all flex items-center justify-center gap-2"
+                  style={{ fontFamily: "var(--font-inter)" }}
+                  title="Spontaneous Detour"
+                >
+                  {isFetchingDetour ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-[#e5d3b3]" strokeWidth={1.5} />
+                  ) : (
+                    <Sparkles className="w-4 h-4 text-[#e5d3b3]" strokeWidth={1.5} />
+                  )}
+                  detour me
+                </motion.button>
+              )}
+
               {/* Main CTA */}
               <motion.button
                 id="start-wandering-button"
@@ -2380,6 +2611,167 @@ export function RouteScreen({
           </div>
         </motion.div>
       )}
+
+      {/* ── Spontaneous Detour Modal ── */}
+      <AnimatePresence>
+        {detourModalOpen && detourWaypoint && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] bg-[#131316]/80 backdrop-blur-md flex items-center justify-center p-5"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              transition={{ type: "spring", stiffness: 350, damping: 30 }}
+              className="w-full max-w-[440px] glass border border-[#e5d3b3]/25 rounded-3xl overflow-hidden shadow-2xl relative"
+            >
+              {/* Close Button */}
+              <button
+                onClick={() => setDetourModalOpen(false)}
+                className="absolute top-4 right-4 z-20 p-2 rounded-full bg-[#131316]/60 text-[#f4f4f5]/60 hover:text-[#f4f4f5] backdrop-blur-sm transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              {/* Detour Header Photo / Gradient */}
+              {detourWaypoint.photo_url && !detourImageError ? (
+                <div className="relative w-full h-44 overflow-hidden bg-[#131316]">
+                  <img
+                    src={detourWaypoint.photo_url}
+                    alt={detourWaypoint.location_name}
+                    className="w-full h-full object-cover"
+                    onError={() => setDetourImageError(true)}
+                  />
+                  <div
+                    className="absolute inset-0"
+                    style={{
+                      background: "linear-gradient(to bottom, transparent 30%, #131316 100%)",
+                    }}
+                  />
+                  <span
+                    className="absolute top-4 left-4 inline-block px-2.5 py-0.5 rounded-full bg-[#131316]/75 backdrop-blur-sm text-[#8ba88e] text-[10px] font-medium tracking-wider uppercase"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                  >
+                    {detourWaypoint.vibe_tag}
+                  </span>
+                  {detourWaypoint.google_rating != null && (
+                    <span
+                      className="absolute top-4 right-14 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#131316]/75 backdrop-blur-sm text-[#e5d3b3] text-[11px] font-medium"
+                      style={{ fontFamily: "var(--font-inter)" }}
+                    >
+                      ★ {detourWaypoint.google_rating.toFixed(1)}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                (() => {
+                  const vs = getVibeStyle(detourWaypoint.vibe_tag || "");
+                  const IconComponent = vs.icon;
+                  return (
+                    <div className={`relative w-full h-44 bg-gradient-to-br ${vs.gradient} flex items-center justify-center overflow-hidden`}>
+                      <IconComponent className={`w-20 h-20 ${vs.iconColor}`} strokeWidth={1} />
+                      <div
+                        className="absolute inset-0"
+                        style={{
+                          background: "linear-gradient(to bottom, transparent 30%, #131316 100%)",
+                        }}
+                      />
+                      <span
+                        className="absolute top-4 left-4 inline-block px-2.5 py-0.5 rounded-full bg-[#131316]/75 backdrop-blur-sm text-[#8ba88e] text-[10px] font-medium tracking-wider uppercase"
+                        style={{ fontFamily: "var(--font-inter)" }}
+                      >
+                        {detourWaypoint.vibe_tag}
+                      </span>
+                      {detourWaypoint.google_rating != null && (
+                        <span
+                          className="absolute top-4 right-14 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#131316]/75 backdrop-blur-sm text-[#e5d3b3] text-[11px] font-medium"
+                          style={{ fontFamily: "var(--font-inter)" }}
+                        >
+                          ★ {detourWaypoint.google_rating.toFixed(1)}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()
+              )}
+
+              {/* Detour Content */}
+              <div className="p-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <Sparkles className="w-4 h-4 text-[#e5d3b3] animate-pulse" />
+                  <span className="text-[11px] tracking-widest font-semibold text-[#e5d3b3]/50 uppercase" style={{ fontFamily: "var(--font-inter)" }}>
+                    Spontaneous Detour
+                  </span>
+                </div>
+
+                <h3
+                  className="text-2xl font-semibold text-[#f4f4f5] leading-tight mb-2"
+                  style={{ fontFamily: "var(--font-playfair)" }}
+                >
+                  {detourWaypoint.location_name}
+                </h3>
+
+                <p
+                  className="text-[#8ba88e] text-[12px] font-medium mb-4 flex items-center gap-1.5"
+                  style={{ fontFamily: "var(--font-inter)" }}
+                >
+                  <MapPin className="w-3.5 h-3.5" />
+                  <span>{detourWaypoint.address_hint}</span>
+                  {detourWalkMins !== null && (
+                    <span className="text-[#f4f4f5]/30 ml-1">
+                      ({detourWalkMins} min walk)
+                    </span>
+                  )}
+                </p>
+
+                <p
+                  className="text-[#f4f4f5]/70 text-[14px] font-light leading-relaxed mb-5"
+                  style={{ fontFamily: "var(--font-inter)" }}
+                >
+                  {detourWaypoint.action_description}
+                </p>
+
+                {/* Insider Tip box */}
+                {detourWaypoint.insider_tip && (
+                  <div className="mb-6 p-4 rounded-2xl bg-[#e5d3b3]/5 border border-[#e5d3b3]/15">
+                    <div className="flex items-center gap-1.5 mb-1 text-[11px] font-semibold text-[#e5d3b3]/60 uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>
+                      <Lightbulb className="w-3.5 h-3.5" />
+                      insider tip
+                    </div>
+                    <p
+                      className="text-[#e5d3b3]/75 text-[13px] font-light leading-relaxed italic"
+                      style={{ fontFamily: "var(--font-playfair)" }}
+                    >
+                      &ldquo;{detourWaypoint.insider_tip}&rdquo;
+                    </p>
+                  </div>
+                )}
+
+                {/* Modal Buttons */}
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => setDetourModalOpen(false)}
+                    className="flex-1 py-3.5 rounded-2xl border border-[#f4f4f5]/10 text-[#f4f4f5]/40 hover:border-[#f4f4f5]/20 hover:text-[#f4f4f5]/60 text-[13px] font-semibold uppercase tracking-wider transition-all duration-200 cursor-pointer"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                  >
+                    Keep Walking
+                  </button>
+                  <button
+                    onClick={handlePivotRoute}
+                    className="flex-1 py-3.5 rounded-2xl bg-[#e5d3b3] text-[#131316] hover:bg-[#ebdcb9] text-[13px] font-semibold uppercase tracking-wider shadow-[0_0_20px_rgba(229,211,179,0.25)] transition-all duration-200 cursor-pointer"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                  >
+                    Pivot Route
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

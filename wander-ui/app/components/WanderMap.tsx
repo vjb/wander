@@ -34,10 +34,10 @@ interface WanderMapProps {
 
 // Build a compact place-card popup — no photo, just the essentials + links
 function buildStopPopup(wp: WaypointData): string {
-  const mapsUrl = wp.place_id
+  const mapsUrl = wp.place_id && !wp.place_id.startsWith("otm:") && !wp.place_id.startsWith("fsq:")
     ? `https://www.google.com/maps/place/?q=place_id:${wp.place_id}`
     : wp.lat != null && wp.lng != null
-    ? `https://www.google.com/maps/search/?api=1&query=${wp.lat},${wp.lng}`
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(wp.location_name + ", " + (wp.address_hint || ""))}`
     : null;
 
   const streetViewUrl =
