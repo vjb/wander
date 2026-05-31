@@ -207,9 +207,11 @@ export function WanderMap({ route, userLat, userLng }: WanderMapProps) {
       });
       mapRef.current = map;
 
-      // Stadia Alidade Smooth Dark — more minimal and premium than CARTO
+      // Stadia Alidade Smooth Dark — premium minimal tiles
+      const stadiaKey = process.env.NEXT_PUBLIC_STADIA_API_KEY || "";
+      const stadiaKeyParam = stadiaKey ? `?api_key=${stadiaKey}` : "";
       L.tileLayer(
-        "https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png",
+        `https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png${stadiaKeyParam}`,
         {
           maxZoom: 20,
           attribution: '© <a href="https://stadiamaps.com/">Stadia Maps</a>',
