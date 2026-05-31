@@ -30,8 +30,10 @@ wander is a lightweight, high-performance web and mobile application that dynami
 
 * **Zero Hallucination Guarantee**: All waypoints are sourced from the live Google Places API. If a venue does not exist in the database, it cannot appear on a wander route.
 * **Pacing Feasibility**: Includes a client-side pacing advisor that analyzes route geometry to flag impossible itineraries before execution.
-* **Dynamic Swapping**: Users can swap individual stops inline. The engine queries new local candidates, filters by category or custom text input (e.g. "pastry shop instead of bookstore"), and updates route metrics in real-time.
-* **Native Navigation Handoff**: Exports multi-stop walking directions directly to Google Maps or Apple Maps with pre-populated Place IDs, avoiding in-app navigation complexity.
+* **Accessibility & Incline Check**: Evaluates walking leg polylines using the Google Elevation API, automatically skipping routes with steep slopes (>8% grade) when slope avoidance is enabled.
+* **Budget Control**: Restricts waypoint selections and estimates individual stop spend to strictly adhere to the user's defined maximum budget cap.
+* **Dynamic Swapping & Spontaneous Detours**: Users can swap stops inline or trigger spontaneous "Vibe Detours" on the fly using a glowing detour button or an interactive device shake gesture while walking in Live Walk Mode.
+* **Native Navigation Handoff**: Exports multi-stop walking directions directly to Google Maps or Apple Maps with geocoded coordinates, avoiding in-app navigation complexity while safely handling third-party landmarks.
 
 ---
 

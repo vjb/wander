@@ -15,10 +15,13 @@ The core operational costs for `wander` are driven by external API calls require
 | **Google Geocoding** | Address to Lat/Lng | $0.005 | 2 (Start, End) | $1.00 | Geolocates coordinates. |
 | **Google Places (New)** | TextSearch (Vibe queries) | $0.032 | 3-5 queries | $12.80 | Corridor venue sweep. |
 | **Google Directions** | Routes / Walking legs | $0.005 | 4-5 legs | $2.25 | Deterministic walking durations. |
+| **Google Elevation** | Elevation / Slope samples | $0.005 | 4-5 legs | $2.25 | sample legs for slope validation. |
 | **OpenWeatherMap** | Weather context | $0.001 | 1 | $0.10 | Weather-aware venue selection. |
 | **OpenAI GPT-4o-mini** | Query Extractor | $0.00015 | 1 | $0.015 | Vibe to search term parsing. |
 | **OpenAI GPT-4o** | Route Curator / Generator | $0.015 | 3 (SSE stream) | $4.50 | Curation and tipping. |
-| **Total Raw Variable Cost** | | | | **$20.665** | **~$0.21 per generation** |
+| **Foursquare Places** | Detour search (Commercial) | $0.000 | (Free quota) | $0.00 | Detour candidates discovery. |
+| **OpenTripMap** | Detour search (Cultural) | $0.000 | (Free quota) | $0.00 | Detour candidates discovery. |
+| **Total Raw Variable Cost** | | | | **$22.915** | **~$0.23 per generation** |
 
 ---
 

@@ -66,8 +66,9 @@
   * *Focus*: Natural language output.
   * *Deficit*: High rate of venue hallucination, lack of real-world geocoding coordinates, incorrect transit times.
 * **wander (Geolocated Curation)**:
-  * *Focus*: Real-world API geocoding + RAG selection + transit verification.
-  * *Deficit*: None. Operates at the intersection of structural accuracy and personalized narration.
+  * *Focus*: Real-world API geocoding + RAG selection + Directions validation.
+  * *Strengths*: Operates at the intersection of narrative curation and structural accuracy, with interactive shake-to-detour triggers, slope safety filters, and LLM-guided budget limits.
+  * *Deficit*: None.
 
 ---
 
@@ -94,4 +95,5 @@ unlimited stop swaps corridor sweeps.               referral booking fee Garmin 
   * **Level 1: Route Caching (SQLite)**: Persisting generated routes reduces duplicate API hits for popular start/end coordinates.
   * **Level 2: Dual-Model Routing**: Extractor model runs on GPT-4o-mini (low cost). Curated generator runs on GPT-4o.
   * **Level 3: Corridor Search Thinning**: Grouping geolocated sweep queries to minimize Google Places API billing calls.
-  * **Unit Target**: Total cost per route generation: ~$0.04. Target revenue per generation (blended ads/subs): ~$0.12. Gross Margin: 66%.
+  * **Level 4: Detour APIs (Foursquare & OpenTripMap)**: Offloading detours to commercial & cultural directories with generous free-call quotas (Foursquare, OpenTripMap) keeps detour search variable cost at $0.00.
+  * **Unit Target**: Total cost per route generation: ~$0.05. Target revenue per generation (blended ads/subs): ~$0.14. Gross Margin: 64%.

@@ -50,6 +50,10 @@ wander accepts a starting location, an ending location, a time budget, and a des
 ## Key Features
 
 * **Live GPS Walk Mode**: Real-time position tracking. Card highlights toggle active states when current coordinates fall within 150 meters of a waypoint. Stop durations auto-advance when active.
+* **Spontaneous "Vibe Detours"**: While in Walk Mode, shake your phone or tap the glowing "detour me" button to discover and pivot to trending local spots (matcha cafes, vintage records, scenic overlooks) within 500m via Foursquare/OpenTripMap.
+* **Accessibility (Incline Grade Safety)**: Samples elevations along walking leg polylines using the Google Elevation API to detect and filter out routes with steep slopes (>8% grade) when avoiding slopes is requested.
+* **Budget Limits**: A custom range slider restricts RAG stop selection and estimates spend per stop to strictly stay under the user's defined per-person budget limits.
+* **Time Breakdown Indicator**: Splits route timelines into clear walking and dwell time breakdown pills (e.g. `🚶 X min walking` and `☕ Y min at stops`).
 * **Dynamic Waypoint Swapping**: Click "swap stop" to replace individual timeline nodes. Queries local candidates and uses GPT-4o to update details, recalculating directions and deep links.
 * **Feeling Lucky Vibe Profile**: Configures the query generator to construct routes with speakeasies, museums, libraries, and architectural landmarks.
 * **Neighborhood Passport**: Database entries log visited neighborhoods, vibe profiles, and completed stops to update user passport status.
@@ -60,6 +64,7 @@ wander accepts a starting location, an ending location, a time budget, and a des
 * **Add to Calendar (ICS)**: Generates download files preloaded with stop coordinates, ratings, stay durations, and navigation links.
 * **Shareable Routes**: Persists generated itineraries with short links (/r/abc123) for cross-user synchronization.
 * **PWA Installable**: Supports Progressive Web App deployment on mobile operating systems for full-screen integration.
+
 
 ---
 
@@ -75,6 +80,9 @@ wander accepts a starting location, an ending location, a time budget, and a des
 | **Geocoding** | Google Geocoding API | Converts natural language addresses to lat/lng coordinates. |
 | **Venue Search** | Google Places API (New) | Parallel radar queries centered along the route corridor. |
 | **Walking Feasibility** | Google Directions API | Real road-network walking durations between every stop. |
+| **Elevation Mapping** | Google Elevation API | Incline/slope checking along route leg polylines. |
+| **Spontaneous Commercial** | Foursquare Places API | Search for commercial detours (matcha, records, dessert) within 500m. |
+| **Spontaneous Cultural** | OpenTripMap API | Search for public art, historic sites, and scenic overlooks within 500m. |
 | **Weather** | OpenWeatherMap API | Live weather retrieval for weather-aware routing. |
 
 ---
