@@ -2346,8 +2346,31 @@ export default function Home() {
     // 1. Register service worker
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js")
-        .then((reg) => console.log("SW registered:", reg.scope))
+        .then((reg) => {
+          console.log("SW registered:", reg.scope);
+          // Check for service worker updates
+          reg.addEventListener("updatefound", () => {
+            const newWorker = reg.installing;
+            if (newWorker) {
+              newWorker.addEventListener("statechange", () => {
+                if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+                  console.log("New service worker installed; reloading page to apply update.");
+                  window.location.reload();
+                }
+              });
+            }
+          });
+        })
         .catch((err) => console.error("SW registration failed:", err));
+
+      // Reload page when service worker controller changes
+      let refreshing = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (!refreshing) {
+          refreshing = true;
+          window.location.reload();
+        }
+      });
     }
     
     // 2. Listen for install prompt

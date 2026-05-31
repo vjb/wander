@@ -35,7 +35,6 @@ load_dotenv()
 # ── Keys ──────────────────────────────────────────────────────────────────────
 OPENAI_KEY  = os.getenv("OPENAI_API_KEY", "")
 GOOGLE_KEY  = os.getenv("GOOGLE_MAPS_API_KEY", "")
-TAVILY_KEY  = os.getenv("TAVILY_API_KEY", "")
 OPENWEATHER_KEY = os.getenv("OPENWEATHER_API_KEY", "")
 
 # ── LangSmith ─────────────────────────────────────────────────────────────────
@@ -469,7 +468,13 @@ async def _places_search_text(query: str, lat: float, lng: float, radius_m: floa
                 },
             )
             if res.status_code != 200:
-                print(f"[PLACES API ERROR] status={res.status_code}, query={query}, response={res.text}")
+                err_text = res.text
+                try:
+                    err_json = res.json()
+                    err_msg = err_json.get("error", {}).get("message", err_text)
+                except Exception:
+                    err_msg = err_text
+                raise Exception(f"Google Places API error ({res.status_code}): {err_msg}")
             places = []
             for p in res.json().get("places", []):
                 # Build photo URL from first photo reference if available
@@ -498,7 +503,7 @@ async def _places_search_text(query: str, lat: float, lng: float, radius_m: floa
             return places
     except Exception as e:
         print(f"[PLACES EXCEPTION] query={query}, error={e}")
-        return []
+        raise e
 
 
 async def fetch_candidate_venues(start_ll: Dict, end_ll: Optional[Dict], vibe: str, time_budget_minutes: int = 90) -> List[Dict]:
@@ -921,7 +926,6 @@ def root():
         "version": "3.0.0",
         "langsmith": _LANGSMITH,
         "google": bool(GOOGLE_KEY),
-        "tavily": bool(TAVILY_KEY),
         "tagline": "Your life isn't a chore; wander.",
     }
 
@@ -945,12 +949,13 @@ async def generate_route(request: RouteRequest):
             end_ll = None
             if GOOGLE_KEY:
                 start_ll = await geocode_location(request.start_location)
+                if not start_ll:
+                    raise Exception(f"could not pinpoint starting location: '{request.start_location}'")
                 end_ll   = await geocode_location(request.end_location)
-            
-            if not start_ll:
-                start_ll = {"lat": 40.7580, "lng": -73.9855}
-            if not end_ll:
-                end_ll = start_ll
+                if not end_ll:
+                    raise Exception(f"could not pinpoint destination location: '{request.end_location}'")
+            else:
+                raise Exception("Google Maps API Key not configured")
 
             # 1.5. Base Walk Sanity Check
             yield "data: " + json.dumps({"type": "status", "message": "verifying distance feasibility..."}) + "\n\n"
@@ -1047,6 +1052,10 @@ async def generate_route(request: RouteRequest):
                     tasks.append(_places_search_text(q, center["lat"], center["lng"], radius_m=radius_m))
             
             results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for r in results:
+                if isinstance(r, Exception):
+                    raise r
             
             seen = set()
             for batch in results:
@@ -1244,16 +1253,38 @@ async def reverse_geocode(lat: float, lng: float):
 async def pacing_advisor(request: AdvisorRequest):
     # Try geocoding start and end
     start_ll = await geocode_location(request.start_location)
-    end_ll = await geocode_location(request.end_location)
-    
     if not start_ll:
-        start_ll = {"lat": 40.7580, "lng": -73.9855} # default NYC
+        raise HTTPException(status_code=400, detail=f"could not pinpoint starting location: '{request.start_location}'")
+    end_ll = await geocode_location(request.end_location)
     if not end_ll:
-        end_ll = start_ll
+        raise HTTPException(status_code=400, detail=f"could not pinpoint destination location: '{request.end_location}'")
         
     dist_m = _coordinate_distance_m(start_ll, end_ll)
-    # Estimate base walk minutes (80m/min walking speed)
-    base_walk_mins = int((dist_m * 1.3) / 80.0)
+    
+    # Query Google Directions API if distance > 100 meters, matching route generation
+    base_walk_mins = 0
+    if dist_m > 100.0:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                res = await client.get(
+                    "https://maps.googleapis.com/maps/api/directions/json",
+                    params={
+                        "origin": f"{start_ll['lat']},{start_ll['lng']}",
+                        "destination": f"{end_ll['lat']},{end_ll['lng']}",
+                        "mode": "walking",
+                        "key": GOOGLE_KEY,
+                    },
+                )
+                data = res.json()
+                if data.get("status") == "OK":
+                    secs = data["routes"][0]["legs"][0]["duration"]["value"]
+                    base_walk_mins = round(secs / 60)
+                else:
+                    base_walk_mins = int((dist_m * 1.3) / 80.0)
+        except Exception:
+            base_walk_mins = int((dist_m * 1.3) / 80.0)
+    else:
+        base_walk_mins = 0
     
     # Heuristics safety check: force impossible status if budget is less than 15 mins per stop
     if request.time_budget_minutes < request.num_stops * 15:
@@ -1459,6 +1490,9 @@ async def swap_waypoint(request: WaypointSwapRequest):
     existing_names = {wp.location_name.lower().strip() for wp in route.waypoints}
     
     def process_batches(batches):
+        for r in batches:
+            if isinstance(r, Exception):
+                raise r
         seen = set()
         cands = []
         for batch in batches:

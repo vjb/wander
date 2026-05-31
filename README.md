@@ -6,10 +6,6 @@
 
 A multi-stop walking route planner that generates three distinct themed itineraries between a starting and ending coordinate. Designed for local navigation, wander queries location APIs to construct structured paths with detailed venue metadata.
 
-<div align="center">
-  <img src="assets/crop-01-landing.png" width="720" alt="wander landing: multi-stop walking route selection" />
-</div>
-
 ---
 
 ## How It Works
@@ -38,12 +34,16 @@ wander accepts a starting location, an ending location, a time budget, and a des
 **3. Fine-tune your stops**: To modify a specific stop, click **swap stop** on its card. The planner supports a "Surprise Me" replacement matching the active vibe, or a custom text requirement (such as "bakery instead of coffee"). The backend queries candidate venues, invokes GPT-4o to select and curate the node, and recalculates walking leg durations, map coordinates, and navigation links.
 
 <div align="center">
-  <img src="assets/crop-05-stops.png" width="660" alt="Waypoint card displaying inline replacement options" />
+  <img src="assets/screenshot-05-stops.png" width="720" alt="Subbing out a place: waypoint card showing inline swap stop popover with Surprise Me and custom request" />
 </div>
 
 <br/>
 
 **4. Start navigation**: Clicking **Start Wandering** generates a Google Maps multi-stop directions link pre-populated with Place IDs for turn-by-turn navigation. Itineraries can also be downloaded as .ics calendar events with locations and deep links.
+
+<div align="center">
+  <img src="assets/map-handoff.png" width="720" alt="Google Maps integration: turn-by-turn walking navigation with pre-loaded stops" />
+</div>
 
 ---
 
@@ -109,19 +109,6 @@ User Request (start, end, time_budget, vibe, local_time)
     │
     └─ Response streamed -> Timeline, Ratings, Map Polyline, Deep Link, ICS
 ```
-
-```mermaid
-graph TD
-    A["User Request (start, end, time_budget, vibe, local_time)"] --> B["1. Geocode Locations (Google Geocoding API)"]
-    B --> C["2. Fetch Weather (OpenWeatherMap API)"]
-    C --> D["3. Extract Keywords (GPT-4o-mini vibe queries)"]
-    D --> E["4. Corridor Radar Sweep (Google Places API New)"]
-    E --> F["5. Route Generation (GPT-4o RAG Curation)"]
-    F --> G["6. Walking Legs Validation (Google Directions API)"]
-    G --> H["7. Persistence (SQLite3 shareable route storage)"]
-    H --> I["SSE Response Stream (Itinerary details, maps links, calendar ICS)"]
-```
-
 ---
 
 ## AI and LLM Prompts
