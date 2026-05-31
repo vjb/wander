@@ -32,7 +32,7 @@ interface WanderMapProps {
   route: RouteData;
 }
 
-// Build a rich place-card popup for a waypoint
+// Build a compact place-card popup — no photo, just the essentials + links
 function buildStopPopup(wp: WaypointData): string {
   const mapsUrl = wp.place_id
     ? `https://www.google.com/maps/place/?q=place_id:${wp.place_id}`
@@ -45,80 +45,42 @@ function buildStopPopup(wp: WaypointData): string {
       ? `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${wp.lat},${wp.lng}`
       : null;
 
-  // Rating bar — filled dots
-  const ratingHtml =
-    wp.google_rating != null
-      ? (() => {
-          const full = Math.floor(wp.google_rating);
-          const half = wp.google_rating - full >= 0.5;
-          const stars = Array.from({ length: 5 }, (_, i) => {
-            if (i < full) return `<span style="color:#e5d3b3">★</span>`;
-            if (i === full && half) return `<span style="color:#e5d3b3;opacity:0.5">★</span>`;
-            return `<span style="color:#e5d3b3;opacity:0.2">★</span>`;
-          }).join("");
-          return `<div style="display:flex;align-items:center;gap:5px;margin-bottom:8px">
-            <span style="font-size:12px;line-height:1">${stars}</span>
-            <span style="font-size:11px;color:#e5d3b3;font-weight:600">${wp.google_rating}</span>
-          </div>`;
-        })()
-      : "";
-
-  const photoHtml = wp.photo_url
-    ? `<div style="width:100%;height:130px;overflow:hidden;border-radius:10px 10px 0 0;position:relative;background:#1a1a1e">
-         <img src="${wp.photo_url}" alt="${wp.location_name}"
-           style="width:100%;height:100%;object-fit:cover;display:block;opacity:0.92"
-           onerror="this.parentElement.style.display='none'"
-         />
-         <div style="position:absolute;inset:0;background:linear-gradient(to bottom,transparent 40%,rgba(19,19,22,0.85))"></div>
-         ${wp.vibe_tag ? `<span style="position:absolute;top:8px;left:8px;background:rgba(19,19,22,0.75);backdrop-filter:blur(6px);border:1px solid rgba(139,168,142,0.3);color:#8ba88e;font-size:10px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;padding:3px 8px;border-radius:20px">${wp.vibe_tag}</span>` : ""}
-       </div>`
-    : wp.vibe_tag
-    ? `<div style="padding:12px 14px 0"><span style="background:rgba(139,168,142,0.12);border:1px solid rgba(139,168,142,0.25);color:#8ba88e;font-size:10px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;padding:3px 8px;border-radius:20px">${wp.vibe_tag}</span></div>`
+  const vibeHtml = wp.vibe_tag
+    ? `<span style="font-size:10px;font-weight:600;letter-spacing:0.07em;text-transform:uppercase;color:#8ba88e;opacity:0.8">${wp.vibe_tag}</span>`
     : "";
 
-  const dwellHtml =
-    wp.duration_mins != null
-      ? `<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:rgba(244,244,245,0.4);background:rgba(244,244,245,0.05);border:1px solid rgba(244,244,245,0.08);border-radius:20px;padding:2px 7px">${wp.duration_mins} min</span>`
-      : "";
-
-  const descHtml = wp.action_description
-    ? `<p style="font-size:12px;line-height:1.55;color:rgba(244,244,245,0.65);margin:0 0 10px">${wp.action_description}</p>`
+  const ratingHtml = wp.google_rating != null
+    ? `<span style="font-size:11px;color:#e5d3b3;font-weight:600">★ ${wp.google_rating}</span>`
     : "";
 
-  const tipHtml = wp.insider_tip
-    ? `<div style="background:rgba(139,168,142,0.06);border-left:2px solid rgba(139,168,142,0.4);padding:7px 10px;border-radius:0 6px 6px 0;margin-bottom:12px">
-         <p style="font-size:11px;line-height:1.5;color:rgba(244,244,245,0.5);margin:0"><span style="color:#8ba88e;font-weight:600">tip · </span>${wp.insider_tip}</p>
-       </div>`
+  const dwellHtml = wp.duration_mins != null
+    ? `<span style="font-size:11px;color:rgba(244,244,245,0.35)">· ${wp.duration_mins} min</span>`
     : "";
+
+  const metaRow = [ratingHtml, dwellHtml].filter(Boolean).join(" ");
 
   const addrHtml = wp.address_hint
-    ? `<p style="font-size:11px;color:rgba(244,244,245,0.3);margin:0 0 10px;line-height:1.4">${wp.address_hint}</p>`
+    ? `<div style="font-size:11px;color:rgba(244,244,245,0.35);margin-top:2px;line-height:1.4">${wp.address_hint}</div>`
     : "";
 
-  const linksHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap">
-    ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;padding:6px 11px;background:#8ba88e;color:#131316;font-size:11px;font-weight:700;border-radius:20px;text-decoration:none;letter-spacing:0.02em">
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>
-      Open in Maps
-    </a>` : ""}
-    ${streetViewUrl ? `<a href="${streetViewUrl}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;padding:6px 11px;background:rgba(244,244,245,0.06);border:1px solid rgba(244,244,245,0.12);color:rgba(244,244,245,0.6);font-size:11px;font-weight:600;border-radius:20px;text-decoration:none">
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
-      Street View
-    </a>` : ""}
-  </div>`;
+  const linksHtml = (mapsUrl || streetViewUrl) ? `
+    <div style="display:flex;gap:6px;margin-top:10px">
+      ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" rel="noopener"
+        style="flex:1;text-align:center;padding:5px 10px;background:#8ba88e;color:#131316;font-size:11px;font-weight:700;border-radius:20px;text-decoration:none;white-space:nowrap">
+        Open in Maps
+      </a>` : ""}
+      ${streetViewUrl ? `<a href="${streetViewUrl}" target="_blank" rel="noopener"
+        style="flex:1;text-align:center;padding:5px 10px;background:rgba(244,244,245,0.07);border:1px solid rgba(244,244,245,0.12);color:rgba(244,244,245,0.55);font-size:11px;font-weight:600;border-radius:20px;text-decoration:none;white-space:nowrap">
+        Street View
+      </a>` : ""}
+    </div>` : "";
 
-  return `<div style="font-family:-apple-system,'Inter',sans-serif;width:240px;background:#17171a;border-radius:12px;overflow:hidden;border:1px solid rgba(139,168,142,0.2);box-shadow:0 8px 32px rgba(0,0,0,0.7)">
-    ${photoHtml}
-    <div style="padding:${wp.photo_url ? "12px" : "14px"} 14px 14px">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:4px">
-        <h3 style="font-size:14px;font-weight:700;color:#f4f4f5;margin:0;line-height:1.3;flex:1">${wp.location_name}</h3>
-        ${dwellHtml}
-      </div>
-      ${addrHtml}
-      ${ratingHtml}
-      ${descHtml}
-      ${tipHtml}
-      ${linksHtml}
-    </div>
+  return `<div style="font-family:-apple-system,sans-serif;width:210px;background:#18181b;border-radius:10px;padding:12px 14px;border:1px solid rgba(139,168,142,0.2);box-shadow:0 6px 24px rgba(0,0,0,0.6)">
+    ${vibeHtml}
+    <div style="font-size:13px;font-weight:700;color:#f4f4f5;line-height:1.3;margin-top:${wp.vibe_tag ? "4px" : "0"}">${wp.location_name}</div>
+    ${addrHtml}
+    ${metaRow ? `<div style="display:flex;align-items:center;gap:6px;margin-top:6px">${metaRow}</div>` : ""}
+    ${linksHtml}
   </div>`;
 }
 
@@ -224,8 +186,9 @@ export function WanderMap({ route }: WanderMapProps) {
         const marker = L.marker([Number(wp.lat), Number(wp.lng)], { icon }).addTo(map);
         marker.bindPopup(buildStopPopup(wp), {
           className: "wander-popup",
-          maxWidth: 260,
-          minWidth: 240,
+          maxWidth: 220,
+          minWidth: 210,
+          closeButton: true,
         });
       }
 
@@ -313,18 +276,20 @@ export function WanderMap({ route }: WanderMapProps) {
         }
         .wander-popup .leaflet-popup-tip-container { display: none !important; }
         .wander-popup .leaflet-popup-close-button {
-          color: rgba(244,244,245,0.4) !important;
-          font-size: 16px !important;
-          top: 6px !important;
-          right: 8px !important;
-          width: 20px !important;
-          height: 20px !important;
-          line-height: 20px !important;
+          color: rgba(244,244,245,0.5) !important;
+          font-size: 18px !important;
+          top: 4px !important;
+          right: 6px !important;
+          width: 22px !important;
+          height: 22px !important;
+          line-height: 22px !important;
+          border-radius: 50% !important;
+          background: rgba(19,19,22,0.6) !important;
           z-index: 10;
         }
         .wander-popup .leaflet-popup-close-button:hover {
           color: #f4f4f5 !important;
-          background: none !important;
+          background: rgba(139,168,142,0.2) !important;
         }
       `}</style>
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
