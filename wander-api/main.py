@@ -28,6 +28,7 @@ from openai import OpenAI
 from pydantic import BaseModel, Field
 
 import database
+import polyline
 
 
 load_dotenv()
@@ -1398,25 +1399,67 @@ async def generate_route(request: RouteRequest):
                 centers = [start_ll]
                 print(f"Round Trip detected. Radius: {radius_m:.0f}m, Center: {start_ll}")
             else:
-                # Progression route: radius scales with distance and time budget
-                radius_m = max(500.0, min(3000.0, (dist_m / 3.0) * 0.7 + time_scale_radius * 0.3))
+                # Progression route: Fetch baseline direct walking polyline from Directions API,
+                # then dynamically sample center coordinates along the path (1 point per 800m).
+                radius_m = 400.0  # Tight radius for targeted local sweeps along path
+                centers = [start_ll]
                 
-                def interpolate(a, b, fraction):
-                    return {
-                        "lat": a["lat"] + (b["lat"] - a["lat"]) * fraction,
-                        "lng": a["lng"] + (b["lng"] - a["lng"]) * fraction
-                    }
+                # Fetch baseline route overview polyline
+                decoded_coords = []
+                try:
+                    async with httpx.AsyncClient(timeout=6.0) as client:
+                        directions_url = "https://maps.googleapis.com/maps/api/directions/json"
+                        res = await client.get(
+                            directions_url,
+                            params={
+                                "origin": f"{start_ll['lat']},{start_ll['lng']}",
+                                "destination": f"{end_ll['lat']},{end_ll['lng']}",
+                                "mode": "walking",
+                                "key": GOOGLE_KEY
+                            }
+                        )
+                        if res.status_code == 200:
+                            data = res.json()
+                            routes = data.get("routes", [])
+                            if routes:
+                                poly_str = routes[0].get("overview_polyline", {}).get("points", "")
+                                decoded_coords = polyline.decode(poly_str)
+                except Exception as e:
+                    print(f"[PATH SAMPLING EXCEPTION] Directions query failed: {e}")
                 
-                centers = [
-                    interpolate(start_ll, end_ll, 0.25),
-                    interpolate(start_ll, end_ll, 0.50),
-                    interpolate(start_ll, end_ll, 0.75),
-                ]
-                print(f"Progression route. Distance: {dist_m:.0f}m, Radius: {radius_m:.0f}m, Centers: 3 points")
+                if decoded_coords:
+                    # Dynamically scale intermediate points: 1 point per 800m (min 2, max 5)
+                    num_samples = max(2, min(5, int(dist_m / 800.0)))
+                    L = len(decoded_coords)
+                    if L > num_samples + 1:
+                        for i in range(1, num_samples + 1):
+                            idx = int(i * (L - 1) / (num_samples + 1))
+                            centers.append({"lat": decoded_coords[idx][0], "lng": decoded_coords[idx][1]})
+                else:
+                    # Fallback to geodetic linear interpolation if Directions API fails or polyline is empty
+                    def interpolate(a, b, fraction):
+                        return {
+                            "lat": a["lat"] + (b["lat"] - a["lat"]) * fraction,
+                            "lng": a["lng"] + (b["lng"] - a["lng"]) * fraction
+                        }
+                    centers.extend([
+                        interpolate(start_ll, end_ll, 0.25),
+                        interpolate(start_ll, end_ll, 0.50),
+                        interpolate(start_ll, end_ll, 0.75),
+                    ])
+                
+                centers.append(end_ll)
+                print(f"Progression route. Distance: {dist_m:.0f}m, Radius: {radius_m:.0f}m, Centers: {len(centers)} sampled path points")
+
+            # Deduplicate centers within 150m of each other
+            unique_centers = []
+            for c in centers:
+                if not any(_coordinate_distance_m(c, uc) < 150.0 for uc in unique_centers):
+                    unique_centers.append(c)
 
             tasks = []
-            for center in centers:
-                # Call OpenTripMap once per center point
+            for center in unique_centers:
+                # Call OpenTripMap once per unique center point
                 tasks.append(_opentripmap_places_search(center["lat"], center["lng"], radius_m=radius_m))
                 for q in queries:
                     # Google search
