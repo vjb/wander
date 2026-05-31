@@ -2,7 +2,7 @@
 
 > *Stop commuting. Start wandering.*
 
-An AI-powered urban experience curator that turns a walk between any two points into three distinct, navigation-ready walking routes. wander is built for both out-of-town travelers landing in a new destination and locals looking to discover the hidden layers of their own streets. It transforms standard A-to-B transit into curated, slow-paced exploration.
+A walking route planner that transforms standard A-to-B directions into three distinct, curated exploration paths. Built for both travelers arriving in a new city and locals looking to discover the hidden layers of their own streets, wander turns transit into exploration.
 
 <div align="center">
   <img src="assets/crop-01-landing.png" width="720" alt="wander landing — the shortest path isn't the point" />
@@ -14,53 +14,59 @@ An AI-powered urban experience curator that turns a walk between any two points 
 
 wander accepts a starting location, an ending location, a time budget, and a desired vibe.
 
-**1. Type your start location** — wander immediately surfaces AI-generated suggested wanders: 3 personalized route ideas based on the time of day, your neighborhood, and current weather. One tap applies the vibe, time budget, stop count, and companion type.
+**1. Set your starting point** — Entering your starting location automatically generates 3 suggested wanders based on the neighborhood, weather, and time of day (e.g. morning coffee crawls vs. twilight bar hops). A single tap configures your entire walk parameters.
 
 <div align="center">
-  <img src="assets/crop-02-presets.png" width="660" alt="AI suggested wanders carousel appears on typing a start location" />
+  <img src="assets/crop-02-presets.png" width="660" alt="preset wanders carousel appears on typing a start location" />
 </div>
 
 <br/>
 
-**2. Add your destination & set your vibe** — choose from four curated vibe presets or describe your own in plain language (e.g. *"spicy noodles, vintage clothing, a quiet park"*). The AI pacing advisor reads your route and time budget and gives an instant green light or a heads-up.
+**2. Select a vibe & customize** — Set your destination, vibe, stops (2 to 5), and time budget. Choose from 6 curated vibe profiles—including **Feeling Lucky** which grants the AI free rein to curate unusual routes with speakeasies, oddities museums, and architectural follies—or enter a custom description. A live pacing advisor validates if your constraints match real walking geometry.
 
 <div align="center">
-  <img src="assets/crop-03-form-filled.png" width="660" alt="Both locations filled, AI pacing advisor showing 3 stops is just right" />
+  <img src="assets/crop-03-form-filled.png" width="660" alt="Form filled with pacing advisor validating stop count" />
 </div>
 
 <br/>
 
-**3. Get three routes, instantly** — wander geocodes your inputs, checks live weather, sweeps the Google Places API along your corridor, and streams three distinct themed walking routes via SSE. Route 1 appears first; Routes 2 and 3 load in the background.
-
-**4. Pick a route and explore** — each stop has real Google ratings, venue photos, curated insider tips, a Street View link, and accurate walk times between stops. Tap **swap stop** to swap any waypoint on the fly, or tap **Start Wandering** to open the full itinerary in Google Maps for turn-by-turn navigation.
+**3. Stream and compare three routes** — The app sweeps the Google Places API along your walking corridor to source real venues and streams three themed walking routes:
+- **Route 1 (Scenic & Relaxed)**: Prioritizes parks, waterfronts, and quiet streets.
+- **Route 2 (Culturally Dense)**: Anchored by bookstores, galleries, and historic architecture.
+- **Route 3 (Social & Lively)**: Focuses on cafes, food halls, local shops, and bars.
 
 <div align="center">
-  <img src="assets/crop-04-route.png" width="660" alt="Three routes found — espresso & art stroll selected with stop timeline" />
+  <img src="assets/crop-04-route.png" width="660" alt="Three routes found, timeline shown" />
 </div>
 
 <br/>
 
-The stop timeline shows real venue photos, ratings, dwell times, and walk legs between every stop — plus a live Google Maps embed of the full route.
+**4. Fine-tune your stops** — If a suggested stop doesn't fit your mood, tap **swap stop** on its card. You can request a "Surprise Me" quick-swap matching the active vibe, or type a custom adjustment (e.g. *"bakery instead of coffee"*). wander queries Places API, calls GPT-4o to curate the replacement venue, and automatically updates the walking leg durations, map polyline, and Google Maps deep link.
 
 <div align="center">
-  <img src="assets/crop-05-stops.png" width="660" alt="Full stop timeline with Afficionado Coffee, Meredith Rosen Gallery, Kinokuniya, and map" />
+  <img src="assets/crop-05-stops.png" width="660" alt="Timeline view showing stop swap popover open" />
 </div>
+
+<br/>
+
+**5. Start exploring** — Click **Start Wandering** to open the entire multi-stop itinerary pre-populated in Google Maps for turn-by-turn walking navigation. You can also download an `.ics` calendar invite with all stop details and maps links pre-loaded.
 
 ---
 
 ## Key Features
 
-* ✨ **AI-Suggested wanders** — time-of-day-aware preset wanders generated from your start location. One tap applies vibe, time budget, stops, and companion.
-* 🧭 **Live Walk Mode** — real-time GPS proximity tracking. Stops glow when you're within 150m. Dwell 5+ minutes and the next stop auto-advances. Shows accurate remaining time including walking legs.
-* 🪄 **Stop Customization & Swapping** — don't like a stop? Tap **swap stop** to trigger a "Surprise Me" quick-swap (based on the current vibe) or enter a custom prompt (e.g. *"bookstore"* or *"bakery"*) to swap that specific stop. wander automatically finds candidates, queries GPT-4o to select and curate the details, and recomputes walking legs and navigation links.
-* 🗺️ **Neighborhood Passport** — a personal stamp book of every neighborhood, vibe, and stop you've explored. Works even on shared route links.
-* 🔁 **Loop & Round-Trip Sync** — tap `🔁` to lock end = start. Perfect for hotel/office loops.
-* 🎭 **Zero-Hallucination RAG** — every stop is sourced from the Google Places API. The AI cannot invent venues.
-* 🌦️ **Weather-Aware Curation** — rainy day? wander automatically pivots to indoor stops: museums, bookstores, covered markets.
-* 🕒 **Daypart Transitioning** — no coffee shops at 8 PM. Routes sequence logically across morning → afternoon → evening.
-* 📅 **Add to Calendar (ICS)** — download calendar events preloaded with stop addresses, ratings, durations, and Google Maps deep links.
-* 🔗 **Shareable Routes** — every route gets a permanent short link (`/r/abc123`). Recipients can check in to stops and earn passport stamps.
-* 📱 **PWA Installable** — install on iOS or Android directly from the browser for a full-screen native feel.
+* ✨ **Suggested preset wanders** — Context-aware walking ideas generated from your starting point based on neighborhood, weather, and daypart.
+* 🧭 **Live Walk Mode** — Real-time GPS proximity tracking. Stops glow when you are within 150m. Dwells auto-advance progress and calculate remaining times.
+* 🪄 **Magic Wand Stop Swapping** — Click "swap stop" to replace any waypoint. Perform a quick surprise replacement matching your vibe or specify custom requirements (e.g. *"bookstore instead of cafe"*).
+* 🎲 **Feeling Lucky Vibe** — A custom vibe profile giving the AI free rein to construct highly unique walks featuring hidden speakeasies, oddity museums, occult libraries, and architectural landmarks.
+* 🗺️ **Neighborhood Passport** — Digital stamp book tracking every neighborhood, vibe, and stop you explore. Works even on shared route links.
+* 🔁 **Round-Trip Loops** — Locks starting point equal to destination for circular wanders starting and ending at your hotel or office.
+* 🎭 **Zero-Hallucination RAG** — Every stop is sourced from the Google Places API. The AI cannot invent venues.
+* 🌦️ **Weather-Aware Curation** — Rainy day? wander automatically pivots to indoor stops: museums, bookstores, covered markets.
+* 🕒 **Daypart Transitioning** — No coffee shops at 8 PM. Routes sequence logically across morning → afternoon → evening.
+* 📅 **Add to Calendar (ICS)** — Download calendar events preloaded with stop addresses, ratings, durations, and Google Maps deep links.
+* 🔗 **Shareable Routes** — Every route gets a permanent short link (`/r/abc123`). Recipients can check in to stops and earn passport stamps.
+* 📱 **PWA Installable** — Install on iOS or Android directly from the browser for a full-screen native feel.
 
 ---
 
