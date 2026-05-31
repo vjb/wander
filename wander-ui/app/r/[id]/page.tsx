@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Loader2, ArrowLeft } from "lucide-react";
+import { Loader2, ArrowLeft, Sparkles } from "lucide-react";
 import { RouteScreen } from "../../page";
 import { usePassport } from "../../hooks/usePassport";
 
@@ -42,6 +42,7 @@ interface WanderRouteOptionV3 {
 interface WanderV3Response {
   routes: WanderRouteOptionV3[];
   weather_context?: string | null;
+  vibe?: string;
 }
 
 export default function SharedRoutePage() {
@@ -53,7 +54,6 @@ export default function SharedRoutePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ── Fix #20: shared route now stamps the passport on check-in ──
   const { addStamp } = usePassport();
 
   useEffect(() => {
@@ -76,6 +76,20 @@ export default function SharedRoutePage() {
     
     fetchSharedRoute();
   }, [id]);
+
+  // "Steal this wander" — deep-link to home with pre-filled params
+  const handleStealWander = () => {
+    if (!routeData) return;
+    const route = routeData.routes?.[0];
+    if (!route) return;
+
+    const params = new URLSearchParams();
+    if (route.start_location) params.set("start", route.start_location);
+    if (route.end_location) params.set("end", route.end_location);
+    if (routeData.vibe) params.set("vibe", routeData.vibe);
+
+    router.push(`/?${params.toString()}`);
+  };
 
   if (loading) {
     return (
@@ -105,7 +119,8 @@ export default function SharedRoutePage() {
 
   return (
     <main className="min-h-screen bg-[#131316] text-[#f4f4f5] relative pb-20">
-      <div className="fixed top-5 left-5 z-50">
+      {/* Top bar */}
+      <div className="fixed top-5 left-5 right-5 z-50 flex items-center justify-between">
         <button
           onClick={() => router.push("/")}
           className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#131316]/85 backdrop-blur-md border border-[#f4f4f5]/6 text-[#f4f4f5]/55 hover:text-[#f4f4f5]/85 hover:border-[#f4f4f5]/12 text-[12px] font-medium transition-colors"
@@ -113,6 +128,17 @@ export default function SharedRoutePage() {
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           create your own wander
+        </button>
+
+        {/* Steal this wander CTA */}
+        <button
+          onClick={handleStealWander}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#8ba88e] text-[#131316] text-[12px] font-semibold shadow-[0_0_20px_rgba(139,168,142,0.35)] hover:bg-[#97b59a] transition-colors"
+          style={{ fontFamily: "var(--font-inter)" }}
+          title="Run this same wander for yourself"
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          steal this wander
         </button>
       </div>
       

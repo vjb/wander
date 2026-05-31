@@ -1,308 +1,231 @@
-# wander
-
-![wander banner](assets/banner.png)
+# wander 🗺️
 
 > *Your life isn't a chore; wander.*
 
-A multi-stop walking route planner that generates three distinct themed itineraries between a starting and ending coordinate. Designed for local navigation, wander queries location APIs to construct structured paths with detailed venue metadata.
+An AI-powered urban itinerary generator that **streams three distinct walking routes in real time**. Enter a starting point, destination, vibe, and time budget — wander does the rest.
+
+Built on a RAG pipeline anchored by verified Google Places data, GPT-4o route curation, Server-Sent Events streaming, and a dark glassmorphism UI.
 
 ---
 
 ## How It Works
 
-wander accepts starting and destination parameters to dynamically structure walking tours.
+```
+You → [Start, End, Vibe, Time Budget]
+         │
+         ├─ 1. Geocode coordinates (Google Geocoding API)
+         ├─ 2. Fetch weather context (OpenWeatherMap)
+         ├─ 3. Extract vibe keywords (GPT-4o-mini)
+         ├─ 4. Corridor radar sweep → 15–20 verified venues (Google Places API New)
+         ├─ 5. Stream 3 themed routes via SSE (GPT-4o RAG)  ← confetti fires here ✨
+         ├─ 6. Validate real walking legs (Google Directions API)
+         └─ 7. Persist for shareable link (SQLite)
+```
 
-**1. Configure parameters**: Enter your starting location and destination (or select round-trip to lock them), vibe profile, stop count (from 2 to 5), time budget, **maximum per-person budget**, and **steep slope avoidance toggle**. An inline pacing advisor validates if target parameters match physical walking geometry.
+During loading, **location-aware trivia facts** stream as `did-you-know` SSE events — no generic spinner. The frontend replaces its message text on every trivia fact received.
 
-<div align="center">
-  <img src="assets/crop-03-form-filled.png" width="660" alt="Form parameters with pacing validation alert" />
-</div>
-
-<br/>
-
-**2. Stream and compare three routes**: The application queries the Google Directions API to fetch the baseline direct path, decodes the polyline, dynamically samples 2-5 intermediate center coordinates based on the route distance (1 point per 800m), and runs tight parallel Google Places sweeps (400m radius restriction). The engine then streams three distinct themed walking itineraries custom-tailored to your selected vibe:
-* **Preset Vibes**: Generates three distinct sub-themes for that vibe (e.g. for *Caffeinated & Cultured*, it curates *the morning ritual*, *the gallery drift*, and *the literary afternoon*).
-* **Custom Vibes**: Generates three thematic variants to match your text profile (*the discovery route*, *the local's pick*, and *the mood route*).
-
-<div align="center">
-  <img src="assets/crop-04-route.png" width="660" alt="Route dashboard showing walk and dwell time metrics" />
-</div>
-
-<br/>
-
-**3. Fine-tune your stops**: To modify a specific stop, click **swap stop** on its card. The planner supports a "Surprise Me" replacement matching the active vibe, or a custom text requirement (such as "bakery instead of coffee"), while respecting your remaining budget limit. The backend queries candidate venues, invokes GPT-4o to select and curate the node, and recalculates walking leg durations, map coordinates, and navigation links.
-
-<div align="center">
-  <img src="assets/screenshot-05-stops.png" width="720" alt="Subbing out a place: waypoint card showing inline swap stop popover with Surprise Me and custom request" />
-</div>
-
-<br/>
-
-**4. Start navigation**: Clicking **Start Wandering** opens a Google Maps walking directions link pre-populated with Place IDs. Itineraries can also be downloaded as `.ics` calendar events. Alternatively, activate **Live Walk Mode** inside the app for real-time proximity stamps and shake-to-trigger **Spontaneous Vibe Detours**.
-
-<div align="center">
-  <img src="assets/map-handoff.png" width="720" alt="Google Maps integration: turn-by-turn walking navigation with pre-loaded stops" />
-</div>
+When all three routes finish streaming, **confetti fires** from both sides of the screen.
 
 ---
 
-## System Sequence Flow
+## Features
 
-The following sequence diagram tracks the lifecycle of user actions, route generation, inline stop swapping, and spontaneous detour pivots:
+### 🧭 Route Generation
+| Feature | Description |
+|---|---|
+| **7 Vibe Presets** | Caffeinated & Cultured · Green & Scenic · Spontaneous & Social · Mental Break · Off the Grid · Conference Break · Feeling Lucky |
+| **Vibe-Specific Archetypes** | Each vibe generates 3 named sub-themes (e.g. "Golden Hour" → *the rooftop circuit / the golden park loop / the dusk market stroll*) |
+| **Custom Vibe Text** | Describe your own vibe ("spicy noodles, vintage clothes, and a quiet place to read") — GPT-4o-mini extracts Places queries |
+| **Feeling Lucky** | AI generates a surprise theme (speakeasies, vinyl records, architectural follies) — different every time |
+| **Round-Trip Mode** | Lock start = end for circular walking loops |
+| **Step Goal Mode** | Alternative to time budget — enter target step count |
+| **RAG, Zero Hallucination** | GPT-4o selects only from verified venue candidates, never invents stops |
+| **Weather-Aware Routing** | Pivots to indoor spaces (museums, covered markets) when rain/snow detected |
+| **Daypart Transitions** | Coffee-first in the morning, bars and jazz clubs in the evening |
+
+### 🎛️ Advanced Filters Accordion
+Hidden by default, revealed by clicking **advanced filters**:
+| Filter | Range |
+|---|---|
+| **Number of Stops** | 2–5 stops per route |
+| **Max Budget Per Person** | $10–$150 (or "unlimited") |
+| **Free Stops Only** | Toggle — prefer parks, landmarks, free cultural stops |
+
+### 🚶 Walk Mode
+Live GPS navigation with:
+- **Proximity Glow** — route card pulses green within 150m
+- **Dwell Timer Auto Check-In** — 5 min at a stop auto-marks it visited
+- **Manual Check-In** button ("i'm here")
+- **Vibe Detour** button — pivot mid-walk to a nearby surprise stop (Foursquare + OpenTripMap candidates)
+
+### ↔️ Swap Stop
+Replace any waypoint:
+- **"Surprise Me"** — AI picks a new stop matching the vibe
+- **Custom Refinement** — type "bakery instead of coffee" or similar text
+- Loading overlay shows *"Finding a new stop along your path..."*
+
+### 💡 Insider Tips
+Every waypoint card shows a concierge-style local secret — always visible, no toggle required. Examples: best seat in the house, off-menu item, ideal time of day.
+
+### 🌀 Dynamic Trivia Loading
+During generation, the loading screen shows location-aware trivia facts streamed via SSE (`did-you-know` events). Three obscure facts about your starting city replace the message text in sequence — no more static spinner messages.
+
+### 📍 Pacing Advisor
+Before generating, a background call to `/api/advisor` checks:
+- Neighborhood density rating
+- Recommended stop count for the corridor
+- Feasibility status (`optimal` / `tight` / `impossible`)
+- Weather advisory
+Client-side also validates: if time budget < 2× (stops × 5-min walk), flags impossible immediately.
+
+### 🔗 Route Sharing
+Every generated route persists to SQLite and returns a short ID. Share `/r/[id]` — includes full-resolution OG image card (Next.js Edge API route, 1200×630).
+
+### 🗺️ Leaflet Map
+Live map below the route tabs shows:
+- Start/end markers
+- Walking polyline between stops
+- Waypoint pins with vibe-colored popups
+
+### ♿ Comfort Mode
+Toggle `Aa` in the header — scales all text, icons, and padding up for accessibility.
+
+### 📅 Add to Calendar
+Download any route as `.ics` calendar events with coordinates, ratings, and durations pre-loaded.
+
+### 🏆 Neighborhood Passport
+Gamified tracking across sessions: visited neighborhoods unlock passport stamps and update streak + level badge.
+
+---
+
+## Architecture
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant User as 👤 User / Frontend (Next.js)
-    participant API as ⚙️ FastAPI Backend
-    participant Map as 🗺️ Google Maps APIs
-    participant OpenAI as 🔮 OpenAI Client
-    participant DB as 💾 SQLite Database
+    participant User as 👤 Frontend (Next.js)
+    participant API as ⚙️ FastAPI
+    participant Maps as 🗺️ Google APIs
+    participant AI as 🔮 OpenAI
+    participant DB as 💾 SQLite
 
-    %% --- INITIAL GENERATION FLOW ---
-    Note over User, API: 1. Initial Route Generation Flow
-    User->>API: Generate Route Request (Start, End, Vibe, Budget, Avoid Slopes)
-    API->>Map: Geocode Start/End Locations to Lat/Lng
-    Map-->>API: Geocoded Coordinates
-    
-    par Parallel Checks
-        API->>Map: Get direct baseline walk duration (Sanity check)
-        Map-->>API: Walk duration minutes
-        API->>OpenAI: Extract Vibe Queries (gpt-4o-mini)
-        OpenAI-->>API: Extracted queries list
+    Note over User, API: Route Generation
+    User->>API: POST /api/wander (start, end, vibe, budget)
+    API->>Maps: Geocode start + end
+    Maps-->>API: Coordinates
+
+    par Parallel
+        API->>Maps: Weather (OpenWeatherMap)
+        API->>AI: Extract vibe keywords (gpt-4o-mini)
+        API->>AI: Fetch location trivia (gpt-4o-mini)
     end
 
-    API->>Map: Corridor Sweep: Parallel TextSearch along polyline points (radius 400m)
-    Map-->>API: 15-20 Verified Venue Candidates
-    
-    API->>OpenAI: Select and curate 3 itineraries via SSE (gpt-4)
-    OpenAI-->>API: Streams selected stop indices, theme, and insider tips
-    
-    API->>Map: Google Directions API: Get transit times for consecutive stop legs
-    Map-->>API: Leg durations & overview polylines
+    API-->>User: SSE: did-you-know facts (trivia stream)
+    API->>Maps: Corridor sweep → Places (5 parallel queries)
+    Maps-->>API: 15–20 verified venues
 
-    alt Avoid Slopes is Enabled
-        API->>Map: Google Elevation API: Sample elevation grades along legs
-        Map-->>API: Elevation data
-        Note over API: Incline validation (>8% safety check)
+    loop 3 routes via SSE
+        API->>AI: Curate route N (gpt-4o, Pydantic schema)
+        AI-->>API: Structured waypoints
+        API->>Maps: Directions API → real walking legs
+        Maps-->>API: Leg durations + polylines
+        API-->>User: SSE: route_N_complete
     end
 
-    API->>DB: Save generated routes to shares table
-    API-->>User: Streams 3 structured itineraries (SSE completed)
-
-    %% --- STOP SWAP CYCLE ---
-    Note over User, API: 2. Inline Waypoint Swap Cycle
-    User->>API: Swap Stop (active route, stop index, vibe, custom refinement)
-    API->>Map: Query alternative candidates within target radius
-    Map-->>API: Venue candidate list
-    API->>OpenAI: Select and curate replacement stop (gpt-4)
-    OpenAI-->>API: Selected stop details & new insider tip
-    API->>Map: Recalculate transit legs (Directions API)
-    Map-->>API: Updated leg durations & polyline path
-    API-->>User: Return updated single Route option
-
-    %% --- VIBE DETOUR CYCLE ---
-    Note over User, API: 3. Spontaneous Vibe Detour Pivot
-    Note over User: User shakes device or clicks glowing "detour me" button
-    User->>API: Fetch Vibe Detour (lat, lng, vibe, remaining budget)
-    API->>Map: Query local spots within 500m (Foursquare & OpenTripMap)
-    Map-->>API: Trending/Historic detour candidates
-    API->>OpenAI: Select and curate single detour (gpt-4)
-    OpenAI-->>API: Curated Detour stop & formatted Wikipedia/Foursquare tip
-    API->>Map: Directions API: Get walk minutes from current GPS to detour
-    Map-->>API: Transit walk minutes
-    API-->>User: Return Spontaneous Detour Option (modal preview)
-    
-    User->>API: Pivot Route (active route, detour stop, active index)
-    API->>API: Swap next unvisited waypoint with detour stop
-    API->>Map: Recalculate remaining legs & Maps deep link (Directions API)
-    Map-->>API: Updated walking durations & polylines
-    API-->>User: Return fully updated active route
+    API->>DB: Persist routes (share link)
+    API-->>User: SSE: done (confetti fires ✨)
 ```
+
+### Tech Stack
+
+| Layer | Technology |
+|---|---|
+| **Frontend** | Next.js 16 (App Router, TypeScript, Turbopack) |
+| **Styling** | Tailwind CSS v4, Framer Motion v12 |
+| **UI Theme** | Obsidian black `#131316` · Matcha green `#8ba88e` · Sand `#e5d3b3` |
+| **Backend** | FastAPI (Python 3.13, Uvicorn) |
+| **Streaming** | Server-Sent Events (SSE) with `asyncio` generators |
+| **AI** | OpenAI GPT-4o (route curation) + GPT-4o-mini (keywords, trivia) |
+| **Geocoding** | Google Geocoding API |
+| **Venues** | Google Places API (New) — primary · Foursquare Places — detours · OpenTripMap — cultural sites |
+| **Navigation** | Google Directions API (real walking times + polylines) |
+| **Elevation** | Google Elevation API (slope/incline validation) |
+| **Weather** | OpenWeatherMap API |
+| **Maps (UI)** | Leaflet.js |
+| **Persistence** | SQLite3 (`database.py`) |
+| **OG Images** | Next.js Edge API (`@vercel/og`, 1200×630) |
+| **PWA** | `manifest.json` + `sw.js` service worker |
+
+### Vibe → Route Archetypes
+
+Each vibe preset generates 3 specifically named sub-themes:
+
+| Vibe | Route 1 | Route 2 | Route 3 |
+|---|---|---|---|
+| ☕ Caffeinated & Cultured | the morning ritual | the gallery drift | the literary afternoon |
+| 🌿 Green & Scenic | the park connector | the scenic overlook loop | the botanist's wander |
+| ⚡ Spontaneous & Social | the rooftop circuit | the local's night out | the market crawl |
+| ⏱️ Mental Break | the decompression loop | the mindful stroll | the reset walk |
+| 🗺️ Off the Grid | the secret city | the quiet corner | the vintage crawl |
+| 💼 Conference Break | the power hour | the delegate's drift | the layover loop |
+| 🎲 Feeling Lucky | serendipity drift | avant-garde stroll | curiosity loop |
+
+For custom vibes, fallback archetypes: *the discovery route* / *the local's pick* / *the mood route*.
 
 ---
 
-## Key Features
+## Market Context
 
-### 1. RAG & Intelligent Routing (Core Engine)
-* **Verified Google Places Data**: Sourced directly from the Google Places API (New) to prevent venue hallucinations.
-* **Weather-Aware Curation**: Auto-pivots to indoor spaces (museums, covered markets, libraries) when weather API detects active precipitation.
-* **Daypart Transitioning**: Sequences stop categories logically by time of day (e.g. prioritizing coffee in the morning and local bars/jazz clubs in the evening).
-* **Feeling Lucky Vibe**: A surprise theme selector that constructs itineraries with speakeasies, oddities museums, and architectural landmarks.
-* **Round-Trip Geometry Sync**: Locks destination coordinates to the starting location to generate circular walking loops.
+**Business Traveler TAM**: 500M+ annual business trips. Conference-goers spend 3–5 days in unfamiliar cities, are highly time-constrained (60–90 minute break windows), and consistently over-index on premium local experiences. wander's **Conference Break** vibe + **business trip** companion generates tight itineraries formatted like concierge recommendations — espresso with WiFi, iconic photo landmark, quick-service lunch — all back by 2pm.
 
-### 2. Active Navigation & Walk Mode
-* **Live GPS Walk Mode**: Real-time position tracking that highlights active timeline cards when within 150 meters of a waypoint and auto-advances stop durations.
-* **Spontaneous "Vibe Detours"**: Tap the glowing detour controller or shake your phone to discover and pivot to trending local spots (vintage records, matcha cafes, historic views) within 500m.
+### Unit Economics
 
-### 3. Pacing, Safety & Constraints
-* **Accessibility (Incline Grade Safety)**: Samples elevations along walking leg polylines using the Google Elevation API to detect and filter out routes with steep slopes (>8% grade).
-* **Budget Limits & Cost Estimation**: Filters waypoints to adhere to per-person budget limits and provides real-time spend estimations per stop.
-* **Walk & Dwell Breakdown Indicators**: Splits route timelines into clear transit walking vs. stop dwell duration pills (e.g. `🚶 X min walking` and `☕ Y min at stops`).
+| Cost Item | Per 100 Runs |
+|---|---|
+| Google Places (5 queries/run) | $12.80 |
+| GPT-4o route curation (3 routes) | $4.50 |
+| Google Directions + Geocoding | $3.25 |
+| GPT-4o-mini (keywords + trivia) | $0.02 |
+| **Total raw variable cost** | **~$0.23/run** |
 
-### 4. Customization & Gamification
-* **Dynamic Waypoint Swapping**: Replace individual stops inline. Queries local candidates and uses GPT-4o to rewrite descriptions and recalculate leg geometries.
-* **Neighborhood Passport**: Gamified database logging of visited neighborhoods, vibe profiles, and completed stops to update user passport progress.
-
-### 5. Portability & Synchronization
-* **Add to Calendar (ICS)**: Downloads calendar events preloaded with stop coordinates, ratings, stay durations, and navigation links.
-* **Shareable Routes**: Persists generated itineraries with short links (`/r/abc123`) for cross-user synchronization.
-* **PWA Installable**: Supports Progressive Web App deployment on iOS/Android for a full-screen, app-like experience.
-
+With 10% Premium subscribers at $4.99/mo + promoted waypoints + affiliate commissions: **~53% gross margin** at scale.
 
 ---
 
-## Tech Stack
+## Getting Started
 
-| Layer | Technology | Description |
-|---|---|---|
-| **Frontend** | Next.js 16 (App Router, TypeScript) | Obsidian black (#131316) and matcha green (#8BA88E) interface. |
-| **Styling and Animations** | Tailwind CSS v4, Framer Motion v12 | Glassmorphism cards, fluid transitions, staggered timeline loading. |
-| **Backend** | FastAPI (Python 3.13, Uvicorn) | High-performance Python backend serving SSE streams. |
-| **Persistence** | SQLite3 | Shareable route links (/r/[id]). |
-| **AI Processing** | OpenAI GPT-4o and GPT-4o-mini | Structured JSON outputs for route curation and keyword extraction. |
-| **Geocoding** | Google Geocoding API | Converts natural language addresses to lat/lng coordinates. |
-| **Venue Search** | Google Places API (New) | Parallel radar queries centered along the route corridor. |
-| **Walking Feasibility** | Google Directions API | Real road-network walking durations between every stop. |
-| **Elevation Mapping** | Google Elevation API | Incline/slope checking along route leg polylines. |
-| **Spontaneous Commercial** | Foursquare Places API | Search for commercial detours (matcha, records, dessert) within 500m. |
-| **Spontaneous Cultural** | OpenTripMap API | Search for public art, historic sites, and scenic overlooks within 500m. |
-| **Weather** | OpenWeatherMap API | Live weather retrieval for weather-aware routing. |
+### Prerequisites
+- Node.js 18+, npm
+- Python 3.13+
+- API keys: `OPENAI_API_KEY`, `GOOGLE_MAPS_API_KEY` (required) + `OPENWEATHER_API_KEY`, `FOURSQUARE_API_KEY`, `OPENTRIPMAP_API_KEY` (optional but unlock full features)
 
----
-
-## System Architecture
-
-wander enforces a strict, multi-stage pipeline to generate walking tours:
-
-```
-User Request (start, end, time_budget, vibe, local_time)
-    │
-    ├─ 1. Geocode Start & End coordinates (Geocoding API)
-    │
-    ├─ 2. Fetch current weather conditions (OpenWeatherMap API)
-    │
-    ├─ 3. Keyword Extraction (GPT-4o-mini)
-    │      Extracts Maps search queries from the user's custom vibe text.
-    │
-    ├─ 4. Corridor Radar Sweep (Places API New)
-    │      5 parallel searches centered along the route path ->
-    │      15-20 verified venue candidates.
-    │
-    ├─ 5. Sequential Route Generation (GPT-4o)
-    │      Streams 3 distinct themed routes via SSE.
-    │      Venues used in Route 1 are excluded from Routes 2 & 3.
-    │
-    ├─ 6. Walking Validation (Directions API)
-    │      Validates real road-network walking time between every stop.
-    │
-    ├─ 7. Persistence (SQLite3)
-    │      Stores route data for permanent shareable links.
-    │
-    └─ Response streamed -> Timeline, Ratings, Map Polyline, Deep Link, ICS
-```
----
-
-## AI and LLM Prompts & Curation
-
-`wander` serves as a prime demonstration of how to integrate AI and LLMs dynamically into a production software system. Instead of using loose text formatting or plain generation prompts, the application uses **Structured Output Pydantic schemas**, **contextual prompt chunking**, and **strict RAG constraints** to ensure output reproducibility and zero-hallucination execution.
-
-All prompt templates are defined directly in the backend code. Below are the key prompts with direct links to the codebase:
-
-### 1. Vibe Query Keyword Extractor (GPT-4o-mini)
-* **Code Link**: [wander-api/main.py#L341-L354](wander-api/main.py#L341-L354)
-* **Model**: `gpt-4o-mini` (low latency, high classification accuracy)
-* **Goal**: Parses natural language vibe text descriptions into structured Google Places search queries.
-* **System Prompt**:
-```
-You are an assistant that extracts specific Google Maps Places search terms from a descriptive vibe. Extract 3 to 5 distinct, concrete, search queries (e.g. 'bookstore', 'ramen', 'rooftop bar') matching the user's desires. Return ONLY a JSON object containing a 'queries' array of strings. Example: {'queries': ['query1', 'query2']}.
-```
-
-### 2. Feeling Lucky surprise generator (GPT-4o-mini)
-* **Code Link**: [wander-api/main.py#L374-L392](wander-api/main.py#L374-L392)
-* **Model**: `gpt-4o-mini`
-* **Goal**: Generates a quirky, surprising themed set of queries when the user chooses "Feeling Lucky".
-* **System Prompt**:
-```
-You are an urban exploration planner. The user clicked 'I'm Feeling Lucky'. Create a cohesive but completely unexpected, quirky, and themed set of 3 to 5 Google Maps search queries. Think of strange but delightful themes: a retro neon crawl, a botanical & vintage book drift, a speakeasy & historic mystery walk, or a vinyl record & coffee alleyway stroll. Be creative and specific with the search queries (e.g. 'independent bookstore', 'retro arcade bar', 'historic fountain overlook'). Return ONLY a JSON object containing a 'queries' array of strings. Example: {'queries': ['query1', 'query2', 'query3']}.
-```
-
-### 3. Route Generator & Curator (GPT-4o)
-* **Code Link**: [wander-api/main.py#L905-L1087](wander-api/main.py#L905-L1087)
-* **Model**: `gpt-4o` (for complex RAG reasoning, time partitioning, and geographic constraints)
-* **Goal**: Selects the sequence of stops from the verified radar sweep results and curates the timeline.
-* **Prompt Architecture**:
-  * **RAG Context**: Fed a strict numbered list of verified places (lat/lng, address, ratings, progression index).
-  * **Dynamic Chunks**: Appends weather pivots (e.g., rain/snow locks outdoor spaces), daypart partitioning (no coffee shops at 8 PM), companion guidelines (date, friends, pet, solo), and budget constraints.
-  * **Strict Constraints**: 1. Zero Invented Stops. 2. strictly increasing index order (no backtracking). 3. Time budget compliance.
-  * **Pydantic Validation Schema**: Evaluates route details directly into `DynamicRouteOptionLLM` with fields for `route_name`, `theme_summary`, and waypoint arrays.
-
-### 4. Stop Swapping Replacement Curator (GPT-4o)
-* **Code Link**: [wander-api/main.py#L1854-L1920](wander-api/main.py#L1854-L1920)
-* **Model**: `gpt-4o`
-* **Goal**: Selects and curates a replacement stop when a user rejects a specific waypoint.
-* **Prompt Details**: Recalls the active route name, other stops, target swap target, any custom user refinement (e.g. "bakery instead of coffee"), remaining budget, and the alternative candidates list. Forces logistic compatibility (cannot backtrack between target index - 1 and target index + 1).
-
-### 5. Spontaneous Detour Curation (GPT-4o)
-* **Code Link**: [wander-api/main.py#L1925-L1965](wander-api/main.py#L1925-L1965)
-* **Model**: `gpt-4o`
-* **Goal**: Chooses the single best spontaneous local detour from Foursquare (commercial) or OpenTripMap (cultural) candidates when walking.
-
----
-
-## Running Locally
-
-### Step 0: Environment Configuration
-
-Before running any installation or execution commands, duplicate the environment configuration template file `wander-api/.env.example` into a local `wander-api/.env` file and populate all variables with your active API keys:
+### Step 1: Environment
 
 ```bash
 cp wander-api/.env.example wander-api/.env
+# Fill in your API keys
 ```
 
-Ensure that all required variables (`OPENAI_API_KEY`, `GOOGLE_MAPS_API_KEY`, and `OPENWEATHER_API_KEY`) are populated prior to startup.
+### Step 2: Backend
 
-### Prerequisites
-* Node.js 18+ & npm
-* Python 3.13+
-
-### Backend
 ```bash
 cd wander-api
 python -m venv venv
-venv\Scripts\activate          # Windows
-source venv/bin/activate       # macOS/Linux
+source venv/bin/activate        # macOS/Linux
+# venv\Scripts\activate         # Windows
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-### Frontend
+### Step 3: Frontend
+
 ```bash
 cd wander-ui
 npm install
 npm run dev
 ```
 
-Visit **http://localhost:3000**. The Next.js dev server proxies `/api/*` to FastAPI at `localhost:8000`.
-
----
-
-## Verification and Testing
-
-```bash
-# Verify integrity of Google API credentials
-wander-api\venv\Scripts\python tests/test_google_apis.py
-
-# Full backend integration and retrieval-augmented generation test suite
-wander-api\venv\Scripts\python tests/test_v3.py
-```
-
-Asserts:
-* Exactly 3 distinct routes generated.
-* Every route has a valid Google Maps walking deep link.
-* `google_rating` present on all RAG-sourced stops.
-* Real `walk_to_next_mins` from Directions API between every stop.
-* Time budgets respect walking and dwell constraints.
+Open **http://localhost:3000**. The Next.js dev server proxies `/api/*` requests to `localhost:8000`.
 
 ---
 
@@ -311,32 +234,56 @@ Asserts:
 ```
 wander/
 ├── wander-api/
-│   ├── main.py               # Route generation pipeline, constraints, SSE streaming
-│   ├── database.py           # SQLite persistence for shared routes
+│   ├── main.py               # Route pipeline, SSE streaming, trivia, swap, detour
+│   ├── database.py           # SQLite persistence for /r/[id] share links
 │   ├── requirements.txt
 │   └── .env                  # API keys (never committed)
 │
 ├── wander-ui/
 │   ├── app/
+│   │   ├── api/og/           # Edge OG image generator (1200×630, @vercel/og)
 │   │   ├── components/
-│   │   │   └── MapPreview.tsx      # Google Maps embed with route polyline
+│   │   │   ├── WanderMap.tsx             # Leaflet map with route polyline
+│   │   │   ├── RotatingTagline.tsx       # Hero tagline rotator
+│   │   │   └── WanderCompleteOverlay.tsx # Completion modal (streaks, level badge)
 │   │   ├── hooks/
-│   │   │   ├── useWalkMode.ts      # Live GPS walk mode, proximity detection
-│   │   │   └── usePassport.ts      # Neighborhood passport (localStorage)
-│   │   ├── r/[id]/page.tsx         # Shareable route renderer
-│   │   ├── globals.css             # Design tokens, animation utilities
-│   │   ├── layout.tsx              # Inter + Playfair Display fonts
-│   │   └── page.tsx                # Main app: inputs, routes, timeline, calendar
-│   ├── public/
-│   │   ├── manifest.json           # PWA manifest
-│   │   └── sw.js                   # Service worker cache
-│   └── next.config.ts              # /api/* proxy → localhost:8000
+│   │   │   ├── useWalkMode.ts      # Live GPS, proximity detection, dwell timer
+│   │   │   ├── usePassport.ts      # Neighborhood passport (localStorage, streaks)
+│   │   │   └── usePreferences.ts   # Preference memory (vibe history, form pre-fill)
+│   │   ├── r/[id]/           # Shareable route renderer + "steal this wander" CTA
+│   │   ├── globals.css       # Design tokens, glassmorphism, animate-shimmer
+│   │   ├── layout.tsx        # Inter + Playfair Display fonts
+│   │   └── page.tsx          # Main app (3154 lines): inputs, routes, timeline, map
+│   └── public/
+│       ├── manifest.json     # PWA manifest
+│       └── sw.js             # Service worker cache
 │
-├── assets/                         # App screenshots
-├── tests/                          # Integration and Google API testing suite
-│   ├── test_google_apis.py
-│   └── test_v3.py
-└── README.md
+├── docs/
+│   ├── business_plan.md      # Unit economics & revenue model
+│   ├── market_size_presentation.md
+│   └── vc_one_pager.md
+│
+└── tests/
+    ├── test_ghost_fixes.py         # No print() calls, CORS, OTM scope, parallel queue
+    ├── test_parallel_generation.py # asyncio.gather, SSE format, queue ordering
+    ├── test_google_apis.py
+    └── test_v3.py
+```
+
+---
+
+## Testing
+
+```bash
+# Run full test suite
+cd wander
+python -m pytest tests/ -v
+
+# Verify backend compiles
+cd wander-api && python -m py_compile main.py
+
+# Verify frontend builds
+cd wander-ui && npm run build
 ```
 
 ---

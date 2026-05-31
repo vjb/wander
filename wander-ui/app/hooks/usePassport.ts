@@ -17,27 +17,36 @@ export interface PassportNeighborhood {
   vibes: string[];
   lastVisited: string; // ISO string
   count: number;
+  level: "newcomer" | "regular" | "local"; // based on visit count
 }
+
+export type NeighborhoodLevel = "newcomer" | "regular" | "local";
+
+export function getNeighborhoodLevel(count: number): NeighborhoodLevel {
+  if (count >= 7) return "local";
+  if (count >= 3) return "regular";
+  return "newcomer";
+}
+
+export const LEVEL_BADGE: Record<NeighborhoodLevel, string> = {
+  newcomer: "📍",
+  regular: "🗺️",
+  local: "🌟",
+};
 
 const STORAGE_KEY = "wander_passport";
 
 function normalizeNeighborhood(raw: string): string {
-  // Guard: coordinate fallbacks like "40.7580, -73.9855" should not be normalized
   if (/^-?\d+\.\d+,\s*-?\d+\.\d+$/.test(raw.trim())) {
     return "unknown neighborhood";
   }
-  // Try to extract the neighborhood portion from a full address
-  // e.g. "123 W 52nd St, Hell's Kitchen, New York, NY 10019, USA" → "hell's kitchen"
   const parts = raw.split(",").map((p) => p.trim());
-  // If it looks like a full address, the 2nd part is often the neighborhood
   if (parts.length >= 3) {
     const candidate = parts[1].toLowerCase();
-    // Skip parts that look like "New York" or state codes like "NY 10019"
     if (!/^\d/.test(candidate) && !/^[A-Z]{2}\s\d/.test(candidate)) {
       return candidate;
     }
   }
-  // Fallback: use the whole string lowercased, stripped of numbers
   const stripped = parts[0].toLowerCase().replace(/\d+/g, "").trim();
   return stripped || raw.toLowerCase();
 }
@@ -73,6 +82,7 @@ function groupEntries(entries: PassportEntry[]): PassportNeighborhood[] {
         vibes: [],
         lastVisited: entry.visitedAt,
         count: 0,
+        level: "newcomer",
       });
     }
     const group = map.get(key)!;
@@ -86,18 +96,52 @@ function groupEntries(entries: PassportEntry[]): PassportNeighborhood[] {
     if (entry.visitedAt > group.lastVisited) {
       group.lastVisited = entry.visitedAt;
     }
+    group.level = getNeighborhoodLevel(group.count);
   }
 
-  // Sort by most recently visited
   return Array.from(map.values()).sort(
     (a, b) => new Date(b.lastVisited).getTime() - new Date(a.lastVisited).getTime()
   );
 }
 
+/** Computes consecutive day streak ending today (or yesterday as base). */
+function computeStreak(entries: PassportEntry[]): number {
+  if (entries.length === 0) return 0;
+  const days = new Set(
+    entries.map((e) => new Date(e.visitedAt).toLocaleDateString("en-CA"))
+  );
+  let streak = 0;
+  const today = new Date();
+  for (let i = 0; i < 365; i++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const key = d.toLocaleDateString("en-CA");
+    if (days.has(key)) {
+      streak++;
+    } else if (i === 0) {
+      // No entry today yet — allow yesterday to be the streak base
+      continue;
+    } else {
+      break;
+    }
+  }
+  return streak;
+}
+
+/** Count unique calendar days with at least one stamp. */
+function computeTotalWanders(entries: PassportEntry[]): number {
+  const days = new Set(
+    entries.map((e) => new Date(e.visitedAt).toLocaleDateString("en-CA"))
+  );
+  return days.size;
+}
+
 export interface UsePassportReturn {
   passport: PassportNeighborhood[];
-  passportCount: number;        // unique neighborhoods
-  totalStops: number;           // total unique stops checked in
+  passportCount: number;
+  totalStops: number;
+  streakDays: number;
+  totalWanders: number;
   addStamp: (entry: PassportEntry) => void;
   clearPassport: () => void;
 }
@@ -105,14 +149,12 @@ export interface UsePassportReturn {
 export function usePassport(): UsePassportReturn {
   const [entries, setEntries] = useState<PassportEntry[]>([]);
 
-  // Load from localStorage on mount (client-only)
   useEffect(() => {
     setEntries(loadRaw());
   }, []);
 
   const addStamp = useCallback((entry: PassportEntry) => {
     setEntries((prev) => {
-      // Avoid duplicate entries for the same stop+neighborhood on same day
       const today = new Date().toDateString();
       const isDuplicate = prev.some(
         (e) =>
@@ -137,6 +179,8 @@ export function usePassport(): UsePassportReturn {
   const passport = groupEntries(entries);
   const passportCount = passport.length;
   const totalStops = new Set(entries.map((e) => e.stopName)).size;
+  const streakDays = computeStreak(entries);
+  const totalWanders = computeTotalWanders(entries);
 
-  return { passport, passportCount, totalStops, addStamp, clearPassport };
+  return { passport, passportCount, totalStops, streakDays, totalWanders, addStamp, clearPassport };
 }

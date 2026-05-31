@@ -20,6 +20,7 @@ import {
   Share,
   Calendar,
   Sliders,
+  SlidersHorizontal,
   Sparkles,
   BookOpen,
   CheckCircle2,
@@ -33,13 +34,15 @@ import {
 
 import { WanderMap } from "./components/WanderMap";
 import { RotatingTagline } from "./components/RotatingTagline";
+import WanderCompleteOverlay from "./components/WanderCompleteOverlay";
 import { useWalkMode } from "./hooks/useWalkMode";
-import { usePassport, type PassportEntry } from "./hooks/usePassport";
+import { usePassport, type PassportEntry, LEVEL_BADGE } from "./hooks/usePassport";
+import { usePreferences } from "./hooks/usePreferences";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Screen = "input" | "loading" | "route";
-type VibeId = "Caffeinated & Cultured" | "Green & Scenic" | "Spontaneous & Social" | "Mental Break" | "Off the Grid" | "Feeling Lucky";
+type VibeId = "Caffeinated & Cultured" | "Green & Scenic" | "Spontaneous & Social" | "Mental Break" | "Off the Grid" | "Feeling Lucky" | "Conference Break";
 
 export type { PassportEntry };
 
@@ -163,6 +166,16 @@ const VIBES: {
     activeGlow: "shadow-[0_0_24px_rgba(251,113,133,0.18)]",
     activeText: "text-rose-300",
   },
+  {
+    id: "Conference Break",
+    emoji: "💼",
+    label: "Conference Break",
+    sub: "Espresso · Landmark · Back by 2pm",
+    activeBorder: "border-amber-400/40",
+    activeBg: "bg-amber-400/8",
+    activeGlow: "shadow-[0_0_24px_rgba(251,191,36,0.18)]",
+    activeText: "text-amber-300",
+  },
 ];
 
 const LOADING_MESSAGES = [
@@ -171,6 +184,7 @@ const LOADING_MESSAGES = [
   "consulting the locals…",
   "perfecting the timing…",
   "uncovering hidden gems…",
+  "checking the conference schedule…",
   "almost ready to wander…",
 ];
 
@@ -685,61 +699,19 @@ function InputScreen({
               custom options
             </p>
             
-            {/* Number of Stops */}
-            <div className="mb-5">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[#f4f4f5]/60 text-xs font-light" style={{ fontFamily: "var(--font-inter)" }}>
-                  number of stops
-                </span>
-                <span className="text-[#e5d3b3] text-xs font-medium" style={{ fontFamily: "var(--font-inter)" }}>
-                  {numStops} {numStops === 1 ? 'stop' : 'stops'}
-                </span>
-              </div>
-              <input
-                id="num-stops"
-                type="range"
-                min={2}
-                max={5}
-                step={1}
-                value={numStops}
-                onChange={(e) => {
-                  setNumStops(Number(e.target.value));
-                  setHasManuallySetStops(true);
-                }}
-              />
-              <div className="flex justify-between text-[#f4f4f5]/25 text-[10px] mt-1 font-light" style={{ fontFamily: "var(--font-inter)" }}>
-                <span>2</span><span>3</span><span>4</span><span>5</span>
-              </div>
-            </div>
-
-            {/* Price Filter & Free Stops */}
-            <div className="flex items-center justify-between border-t border-[#f4f4f5]/6 pt-4 mt-4">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-3.5 h-3.5 text-[#e5d3b3]" strokeWidth={1.5} />
-                <span className="text-[#f4f4f5]/60 text-xs font-light" style={{ fontFamily: "var(--font-inter)" }}>
-                  prefer free stops only
-                </span>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={freeOnly}
-                onClick={() => setFreeOnly(!freeOnly)}
-                className={`w-10 h-6 rounded-full transition-colors duration-200 focus:outline-none flex items-center p-0.5 cursor-pointer ${
-                  freeOnly ? 'bg-[#8ba88e]' : 'bg-[#f4f4f5]/10'
-                }`}
-              >
-                <div
-                  className={`w-5 h-5 rounded-full bg-[#131316] shadow-md transform transition-transform duration-200 ${
-                    freeOnly ? 'translate-x-4' : 'translate-x-0'
-                  }`}
-                />
-              </button>
-            </div>
+          {/* ── Advanced Filters Accordion ── */}
+          <AdvancedFiltersAccordion
+            numStops={numStops}
+            setNumStops={(v) => { setNumStops(v); setHasManuallySetStops(true); }}
+            freeOnly={freeOnly}
+            setFreeOnly={setFreeOnly}
+            maxBudget={maxBudget}
+            setMaxBudget={setMaxBudget}
+          />
 
             {/* Avoid Steep Slopes (Flat walks only) */}
             <div className="flex items-center justify-between border-t border-[#f4f4f5]/6 pt-4 mt-4">
-              <span className="text-[#f4f4f5]/60 text-xs font-light" style={{ fontFamily: "var(--font-inter)" }}>
+              <span className="text-[#f4f4f5]/60 text-xs font-light">
                 avoid steep slopes (flat walks only)
               </span>
               <button
@@ -760,30 +732,6 @@ function InputScreen({
               </button>
             </div>
 
-            {/* Max Budget per Person */}
-            <div className="border-t border-[#f4f4f5]/6 pt-4 mt-4">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-[#f4f4f5]/60 text-xs font-light" style={{ fontFamily: "var(--font-inter)" }}>
-                  max budget per person
-                </span>
-                <span className="text-[#e5d3b3] text-xs font-medium" style={{ fontFamily: "var(--font-inter)" }}>
-                  {maxBudget === 150 ? "unlimited" : `$${maxBudget}`}
-                </span>
-              </div>
-              <input
-                id="max-budget"
-                type="range"
-                min={10}
-                max={150}
-                step={5}
-                value={maxBudget}
-                onChange={(e) => setMaxBudget(Number(e.target.value))}
-              />
-              <div className="flex justify-between text-[#f4f4f5]/25 text-[10px] mt-1 font-light" style={{ fontFamily: "var(--font-inter)" }}>
-                <span>$10</span><span>$50</span><span>$100</span><span>unlimited</span>
-              </div>
-            </div>
-
             {/* Companion Row */}
             <div className="border-t border-[#f4f4f5]/6 pt-4 mt-4">
               <span className="text-[#f4f4f5]/60 text-xs font-light block mb-3" style={{ fontFamily: "var(--font-inter)" }}>
@@ -794,7 +742,8 @@ function InputScreen({
                   { id: "solo", label: "solo", icon: "🧍" },
                   { id: "date", label: "date", icon: "🕯️" },
                   { id: "friends", label: "friends", icon: "🍻" },
-                  { id: "pet", label: "pet", icon: "🐶" }
+                  { id: "pet", label: "pet", icon: "🐶" },
+                  { id: "business", label: "business trip", icon: "💼" },
                 ].map((item) => {
                   const active = companion === item.id;
                   return (
@@ -881,6 +830,109 @@ function InputScreen({
         </div>
       </motion.div>
     </motion.div>
+  );
+}
+
+// ── Advanced Filters Accordion ───────────────────────────────────────────────
+
+function AdvancedFiltersAccordion({
+  numStops, setNumStops, freeOnly, setFreeOnly, maxBudget, setMaxBudget,
+}: {
+  numStops: number;
+  setNumStops: (v: number) => void;
+  freeOnly: boolean;
+  setFreeOnly: (v: boolean) => void;
+  maxBudget: number;
+  setMaxBudget: (v: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mb-5">
+      <button
+        id="advanced-filters-toggle"
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 text-[#e5d3b3]/40 hover:text-[#e5d3b3]/70 text-[11px] font-medium tracking-widest uppercase transition-colors cursor-pointer"
+      >
+        <SlidersHorizontal className="w-3 h-3" strokeWidth={1.5} />
+        advanced filters
+        <motion.span
+          animate={{ rotate: open ? 180 : 0 }}
+          transition={{ duration: 0.2 }}
+          className="inline-flex"
+        >
+          <ChevronDown className="w-3 h-3" strokeWidth={2} />
+        </motion.span>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, height: 0, marginTop: 0 }}
+            animate={{ opacity: 1, height: "auto", marginTop: 16 }}
+            exit={{ opacity: 0, height: 0, marginTop: 0 }}
+            transition={{ duration: 0.3, ease: "easeInOut" }}
+            className="overflow-hidden"
+          >
+            {/* Number of Stops */}
+            <div className="mb-5">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[#f4f4f5]/60 text-xs font-light">number of stops</span>
+                <span className="text-[#e5d3b3] text-xs font-medium">
+                  {numStops} {numStops === 1 ? "stop" : "stops"}
+                </span>
+              </div>
+              <input
+                id="num-stops"
+                type="range" min={2} max={5} step={1}
+                value={numStops}
+                onChange={(e) => setNumStops(Number(e.target.value))}
+              />
+              <div className="flex justify-between text-[#f4f4f5]/25 text-[10px] mt-1 font-light">
+                <span>2</span><span>3</span><span>4</span><span>5</span>
+              </div>
+            </div>
+
+            {/* Max Budget */}
+            <div className="border-t border-[#f4f4f5]/6 pt-4 mt-2 mb-4">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-[#f4f4f5]/60 text-xs font-light">max budget per person</span>
+                <span className="text-[#e5d3b3] text-xs font-medium">
+                  {maxBudget === 150 ? "unlimited" : `$${maxBudget}`}
+                </span>
+              </div>
+              <input
+                id="max-budget"
+                type="range" min={10} max={150} step={5}
+                value={maxBudget}
+                onChange={(e) => setMaxBudget(Number(e.target.value))}
+              />
+              <div className="flex justify-between text-[#f4f4f5]/25 text-[10px] mt-1 font-light">
+                <span>$10</span><span>$50</span><span>$100</span><span>unlimited</span>
+              </div>
+            </div>
+
+            {/* Free Only Toggle */}
+            <div className="flex items-center justify-between border-t border-[#f4f4f5]/6 pt-4">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-3.5 h-3.5 text-[#e5d3b3]" strokeWidth={1.5} />
+                <span className="text-[#f4f4f5]/60 text-xs font-light">prefer free stops only</span>
+              </div>
+              <button
+                type="button" role="switch" aria-checked={freeOnly}
+                onClick={() => setFreeOnly(!freeOnly)}
+                className={`w-10 h-6 rounded-full transition-colors duration-200 focus:outline-none flex items-center p-0.5 cursor-pointer ${
+                  freeOnly ? "bg-[#8ba88e]" : "bg-[#f4f4f5]/10"
+                }`}
+              >
+                <div className={`w-5 h-5 rounded-full bg-[#131316] shadow-md transform transition-transform duration-200 ${
+                  freeOnly ? "translate-x-4" : "translate-x-0"
+                }`} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
@@ -991,7 +1043,7 @@ function WaypointCard({
   onSwapWaypoint?: (index: number, customRefinement?: string) => Promise<void>;
   isSwapping?: boolean;
 }) {
-  const [tipOpen, setTipOpen] = useState(false);
+
   const [swapMenuOpen, setSwapMenuOpen] = useState(false);
   const [customInput, setCustomInput] = useState("");
   const [copied, setCopied] = useState(false);
@@ -1239,36 +1291,23 @@ function WaypointCard({
                 swap stop
               </button>
             )}
-            <button
-              id={`tip-toggle-${waypoint.order}`}
-              onClick={() => setTipOpen((o) => !o)}
-              className="flex items-center gap-1 text-[#e5d3b3]/50 hover:text-[#e5d3b3]/80 font-medium transition-colors whitespace-nowrap cursor-pointer"
-              style={{ fontFamily: "var(--font-inter)" }}
+          {/* Insider Tip — always visible if present */}
+          {waypoint.insider_tip && (
+            <div
+              id={`insider-tip-${waypoint.order}`}
+              className="pt-3 border-t border-[#e5d3b3]/8 mt-3"
             >
-              <Lightbulb className="w-3.5 h-3.5" strokeWidth={1.5} />
-              {tipOpen ? "hide tip" : "insider tip"}
-            </button>
-          </div>
-          <AnimatePresence>
-            {tipOpen && (
-              <motion.div
-                initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                animate={{ opacity: 1, height: "auto", marginTop: 12 }}
-                exit={{ opacity: 0, height: 0, marginTop: 0 }}
-                transition={{ duration: 0.3, ease: "easeInOut" }}
-                className="overflow-hidden"
+              <div className="flex items-center gap-1 mb-1.5">
+                <Lightbulb className="w-3 h-3 text-[#e5d3b3]/50" strokeWidth={1.5} />
+                <span className="text-[#e5d3b3]/40 text-[11px] font-medium uppercase tracking-widest">insider tip</span>
+              </div>
+              <p
+                className="text-[#e5d3b3]/60 text-[13px] font-light leading-relaxed italic"
               >
-                <div className="pt-3 border-t border-[#e5d3b3]/8">
-                  <p
-                    className="text-[#e5d3b3]/60 text-[13px] font-light leading-relaxed italic"
-                    style={{ fontFamily: "var(--font-playfair)" }}
-                  >
-                    &ldquo;{waypoint.insider_tip}&rdquo;
-                  </p>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+              &#8220;{waypoint.insider_tip}&#8221;
+              </p>
+            </div>
+          )}
 
           <AnimatePresence>
             {swapMenuOpen && !isVisited && (
@@ -1340,12 +1379,13 @@ function WaypointCard({
               className="absolute inset-0 bg-[#131316]/75 backdrop-blur-md z-20 flex flex-col items-center justify-center gap-3"
             >
               <div className="w-5 h-5 rounded-full border-2 border-[#8ba88e]/30 border-t-[#8ba88e] animate-spin" />
-              <span className="text-[12px] text-[#8ba88e] font-medium tracking-wide lowercase" style={{ fontFamily: "var(--font-inter)" }}>
-                swapping stop...
+              <span className="text-[12px] text-[#8ba88e] font-medium tracking-wide lowercase">
+                Finding a new stop along your path...
               </span>
             </motion.div>
           )}
         </AnimatePresence>
+        </div>
       </div>
     </motion.div>
   );
@@ -1393,11 +1433,15 @@ function WalkLabel({ mins, origin, destination }: { mins: number, origin?: {lat:
 function PassportOverlay({
   passport,
   totalStops,
+  streakDays,
+  totalWanders,
   onClose,
   onClear,
 }: {
   passport: import("./hooks/usePassport").PassportNeighborhood[];
   totalStops: number;
+  streakDays: number;
+  totalWanders: number;
   onClose: () => void;
   onClear: () => void;
 }) {
@@ -1437,7 +1481,21 @@ function PassportOverlay({
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {/* Streak pill */}
+          {streakDays > 0 && (
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#e5d3b3]/10 border border-[#e5d3b3]/20">
+              <span className="text-base">🔥</span>
+              <span className="text-[#e5d3b3] text-[11px] font-semibold" style={{ fontFamily: "var(--font-inter)" }}>
+                {streakDays} {streakDays === 1 ? "day" : "day streak"}
+              </span>
+            </div>
+          )}
+          {totalWanders > 0 && (
+            <span className="text-[#f4f4f5]/25 text-[11px] font-light" style={{ fontFamily: "var(--font-inter)" }}>
+              {totalWanders} {totalWanders === 1 ? "wander" : "wanders"}
+            </span>
+          )}
           {passport.length > 0 && (
             <button
               onClick={() => {
@@ -1509,7 +1567,11 @@ function PassportOverlay({
                       last visited {formatDate(hood.lastVisited)}
                     </p>
                   </div>
-                  <div className="flex flex-col items-end gap-1">
+                  <div className="flex flex-col items-end gap-1.5">
+                    {/* Level badge */}
+                    <span className="text-lg" title={`${hood.level}: ${hood.count} visits`}>
+                      {LEVEL_BADGE[hood.level]}
+                    </span>
                     <span className="px-2.5 py-1 rounded-full bg-[#e5d3b3]/10 border border-[#e5d3b3]/20 text-[#e5d3b3] text-[11px] font-semibold" style={{ fontFamily: "var(--font-inter)" }}>
                       {hood.count} {hood.count === 1 ? "visit" : "visits"}
                     </span>
@@ -1548,6 +1610,13 @@ function PassportOverlay({
                     ))}
                   </div>
                 )}
+
+                {/* Level label */}
+                <div className="mt-2 flex items-center gap-1.5">
+                  <span className="text-[#f4f4f5]/20 text-[9px] font-medium uppercase tracking-widest" style={{ fontFamily: "var(--font-inter)" }}>
+                    {hood.level === "local" ? "🌟 local" : hood.level === "regular" ? "🗺️ regular" : "📍 newcomer"}
+                  </span>
+                </div>
               </div>
             </motion.div>
           ))
@@ -1580,6 +1649,10 @@ export function RouteScreen({
 }) {
   const [routes, setRoutes] = useState<WanderRouteOptionV3[]>(data.routes || []);
   const [swappingIndex, setSwappingIndex] = useState<number | null>(null);
+  const [wanderCompleteShown, setWanderCompleteShown] = useState(false);
+
+  // Passport hook (for streak/wander data in completion overlay)
+  const { streakDays: completionStreak, totalWanders: completionTotalWanders, passport: completionPassport } = usePassport();
 
   const [isFetchingDetour, setIsFetchingDetour] = useState(false);
   const [detourWaypoint, setDetourWaypoint] = useState<any | null>(null);
@@ -1730,6 +1803,15 @@ export function RouteScreen({
     stopsWithoutCoords,
   } = useWalkMode(walkWaypoints, handleCheckIn);
 
+  // Trigger completion overlay when all stops are checked in
+  const allStopsDone = activeRoute && checkedInStops.size >= activeRoute.waypoints.length && activeRoute.waypoints.length > 0;
+  useEffect(() => {
+    if (allStopsDone && !wanderCompleteShown) {
+      const timer = setTimeout(() => setWanderCompleteShown(true), 800);
+      return () => clearTimeout(timer);
+    }
+  }, [allStopsDone, wanderCompleteShown]);
+
   const handleTriggerDetour = async () => {
     if (!activeRoute) return;
     setIsFetchingDetour(true);
@@ -1824,64 +1906,9 @@ export function RouteScreen({
     }
   };
 
-  // Device shake listener for spontaneous detour
-  useEffect(() => {
-    if (!walkModeActive) return;
-
-    let lastX: number | null = null;
-    let lastY: number | null = null;
-    let lastZ: number | null = null;
-    let lastUpdate = 0;
-    const SHAKE_THRESHOLD = 15; // sensitivity threshold
-
-    const handleMotion = (event: DeviceMotionEvent) => {
-      const acceleration = event.accelerationIncludingGravity;
-      if (!acceleration) return;
-
-      const currTime = Date.now();
-      if (currTime - lastUpdate > 100) {
-        const diffTime = currTime - lastUpdate;
-        lastUpdate = currTime;
-
-        const x = acceleration.x ?? 0;
-        const y = acceleration.y ?? 0;
-        const z = acceleration.z ?? 0;
-
-        if (lastX !== null && lastY !== null && lastZ !== null) {
-          const speed = (Math.abs(x + y + z - lastX - lastY - lastZ) / diffTime) * 10000;
-          if (speed > SHAKE_THRESHOLD) {
-            // Trigger detour if not already loading or open
-            if (!isFetchingDetour && !detourModalOpen) {
-              handleTriggerDetour();
-            }
-          }
-        }
-        lastX = x;
-        lastY = y;
-        lastZ = z;
-      }
-    };
-
-    if (
-      typeof window !== "undefined" &&
-      typeof (DeviceMotionEvent as any).requestPermission === "function"
-    ) {
-      (DeviceMotionEvent as any)
-        .requestPermission()
-        .then((permissionState: string) => {
-          if (permissionState === "granted") {
-            window.addEventListener("devicemotion", handleMotion);
-          }
-        })
-        .catch(console.error);
-    } else {
-      window.addEventListener("devicemotion", handleMotion);
-    }
-
-    return () => {
-      window.removeEventListener("devicemotion", handleMotion);
-    };
-  }, [walkModeActive, isFetchingDetour, detourModalOpen, userPosition]);
+  // Shake-to-detour has been removed.
+  // Detours are triggered exclusively via the UI button.
+  // See handleTriggerDetour for the button-driven flow.
 
   const handleShare = async () => {
     if (!activeRoute) return;
@@ -1899,12 +1926,29 @@ export function RouteScreen({
         const data = await res.json();
         const url = `${window.location.origin}/r/${data.id}`;
         setShareUrl(url);
-        const waypointNames = activeRoute.waypoints.map((w, idx) => `${idx + 1}. ${w.location_name}`).join(" -> ");
+        const stopList = activeRoute.waypoints.map((w, idx) => `${idx + 1}. ${w.location_name}`).join(" → ");
         const costStr = activeRoute.estimated_total_cost_usd !== undefined
-          ? `\nEst. Spend: ${activeRoute.estimated_total_cost_usd === 0 ? "Free" : `$${activeRoute.estimated_total_cost_usd}`}`
+          ? `\nEst. spend: ${activeRoute.estimated_total_cost_usd === 0 ? "free" : `$${activeRoute.estimated_total_cost_usd}`}`
           : "";
-        const shareText = `Wander Route: ${activeRoute.route_name}\nWaypoints: ${waypointNames}\nDuration: ${activeRoute.total_walking_time_mins} minutes total${costStr}\nDetails: ${url}`;
-        await navigator.clipboard.writeText(shareText);
+        const shareText = `${activeRoute.route_name}\n${stopList}${costStr}\nwander with me → ${url}`;
+
+        // Rec 4: Try native Web Share API first, fallback to clipboard
+        if (typeof navigator.share === "function") {
+          try {
+            await navigator.share({
+              title: activeRoute.route_name,
+              text: shareText,
+              url,
+            });
+          } catch (shareErr: any) {
+            // User cancelled share or API failed — silently fallback to clipboard
+            if (shareErr?.name !== "AbortError") {
+              await navigator.clipboard.writeText(shareText);
+            }
+          }
+        } else {
+          await navigator.clipboard.writeText(shareText);
+        }
         setTimeout(() => setShareUrl(null), 3000);
       }
     } catch (e) {
@@ -2060,13 +2104,18 @@ export function RouteScreen({
                       transition={{ type: "spring", stiffness: 400, damping: 30 }}
                     />
                   )}
+                  {/* Skeleton shimmer on inactive tabs still loading */}
+                  {isLoading && !isSelected && (
+                    <div className="absolute inset-0 rounded-xl overflow-hidden route-tab-skeleton">
+                      <div className="h-full w-full bg-gradient-to-r from-[#f4f4f5]/0 via-[#f4f4f5]/6 to-[#f4f4f5]/0 animate-shimmer bg-[length:200%_100%]" />
+                    </div>
+                  )}
                   <span
                     className={`relative z-10 text-[11px] font-semibold leading-snug block tracking-wide transition-colors ${
                       isSelected
                         ? "text-[#8ba88e]"
                         : "text-[#f4f4f5]/45 hover:text-[#f4f4f5]/75"
                     }`}
-                    style={{ fontFamily: "var(--font-inter)" }}
                     title={tabTitle}
                   >
                     {tabTitle}
@@ -2378,7 +2427,7 @@ export function RouteScreen({
                 ) : (
                   <Share className="w-3.5 h-3.5" />
                 )}
-                {shareUrl ? "link copied!" : "share this route"}
+                {shareUrl ? "shared! ✓" : "share this wander"}
               </button>
 
               <button
@@ -2772,6 +2821,17 @@ export function RouteScreen({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Wander Complete Overlay */}
+      <WanderCompleteOverlay
+        isVisible={wanderCompleteShown}
+        neighborhood={activeRoute?.start_location ?? "your neighborhood"}
+        neighborhoodVisitCount={completionPassport[0]?.count ?? 1}
+        streakDays={completionStreak}
+        totalWanders={completionTotalWanders}
+        onClose={() => setWanderCompleteShown(false)}
+        onPlanAnother={() => { setWanderCompleteShown(false); onReset(); }}
+      />
     </motion.div>
   );
 }
@@ -2790,7 +2850,7 @@ export default function Home() {
   const [isLocating, setIsLocating] = useState(false);
   const [routeData, setRouteData] = useState<WanderV3Response | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loadingMsg, setLoadingMsg] = useState(LOADING_MESSAGES[0]);
+  const [loadingMsg, setLoadingMsg] = useState("mapping your wander…");
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [weatherContext, setWeatherContext] = useState<string | null>(null);
   const [numStops, setNumStops] = useState<number>(3);
@@ -2811,8 +2871,59 @@ export default function Home() {
   }, [isRoundTrip, start]);
 
   // ── Passport ──
-  const { passport, passportCount, totalStops, addStamp, clearPassport } = usePassport();
+  const { passport, passportCount, totalStops, streakDays, totalWanders, addStamp, clearPassport } = usePassport();
   const [passportOpen, setPassportOpen] = useState(false);
+
+  // ── Preference Memory (Rec 5) ──
+  const { preferences, isLoaded, saveWander } = usePreferences();
+
+  // Pre-fill form from preferences on first load
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (preferences.wanderCount > 0) {
+      if (preferences.lastVibe) setVibe(preferences.lastVibe as any);
+      if (preferences.lastCustomVibe) setCustomVibe(preferences.lastCustomVibe);
+      if (preferences.lastStopCount) setNumStops(preferences.lastStopCount);
+      if (preferences.lastCompanion) setCompanion(preferences.lastCompanion);
+      if (preferences.lastTimeBudget) setTimeBudget(preferences.lastTimeBudget);
+      if (preferences.lastInputMode) setInputMode(preferences.lastInputMode);
+      if (preferences.lastStepGoal) setStepGoal(preferences.lastStepGoal);
+      if (typeof preferences.lastFreeOnly === "boolean") setFreeOnly(preferences.lastFreeOnly);
+      if (typeof preferences.lastAvoidSlopes === "boolean") setAvoidSlopes(preferences.lastAvoidSlopes);
+      if (preferences.lastMaxBudget) setMaxBudget(preferences.lastMaxBudget);
+    }
+  // Only run once after preferences are loaded
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded]);
+
+  // Read ?start=, ?end=, ?vibe= query params (from "steal this wander" deep-link)
+  // URL params take priority over prefs since they represent explicit intent.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const qStart = sp.get("start");
+    const qEnd = sp.get("end");
+    const qVibe = sp.get("vibe");
+    if (qStart) setStart(qStart);
+    if (qEnd) setEnd(qEnd);
+    if (qVibe) {
+      // Check if it's a known vibe id
+      const knownVibes = [
+        "Caffeinated & Cultured", "Green & Scenic", "Spontaneous & Social",
+        "Mental Break", "Off the Grid", "Feeling Lucky"
+      ];
+      if (knownVibes.includes(qVibe)) {
+        setVibe(qVibe as any);
+      } else {
+        setCustomVibe(qVibe);
+      }
+    }
+    // Clean up URL params without page reload
+    if (qStart || qEnd || qVibe) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     // 1. Register service worker
@@ -2927,15 +3038,9 @@ export default function Home() {
 
 
 
-  useEffect(() => {
-    if (screen !== "loading") return;
-    let i = 0;
-    const interval = setInterval(() => {
-      i = (i + 1) % LOADING_MESSAGES.length;
-      setLoadingMsg(LOADING_MESSAGES[i]);
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [screen]);
+  // Loading messages are now driven entirely by SSE "status" events from the backend.
+  // The backend streams location-aware trivia facts as did-you-know messages.
+  // No client-side interval needed.
 
   const handleWander = useCallback(async () => {
     const selectedVibe = vibe || customVibe;
@@ -2944,6 +3049,7 @@ export default function Home() {
     setError(null);
     setWeatherContext(null);
     setRouteData({ routes: [] });
+    setLoadingMsg("mapping your wander…");
 
     try {
       // Formulate local time context (e.g. "Saturday, 09:30 PM")
@@ -3023,11 +3129,24 @@ export default function Home() {
         throw new Error("Could not curate any routes. Try a different query.");
       }
 
+      // Save preferences after a successful wander (Rec 5) — once, after stream ends
+      saveWander({
+        lastVibe: vibe || customVibe,
+        lastCustomVibe: customVibe,
+        lastStopCount: numStops,
+        lastCompanion: companion,
+        lastTimeBudget: timeBudget,
+        lastInputMode: inputMode,
+        lastStepGoal: stepGoal,
+        lastFreeOnly: freeOnly,
+        lastAvoidSlopes: avoidSlopes,
+        lastMaxBudget: maxBudget,
+      });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong");
       setScreen("input");
     }
-  }, [start, end, timeBudget, vibe, customVibe, numStops, freeOnly, companion, avoidSlopes, maxBudget]);
+  }, [start, end, timeBudget, effectiveTimeBudget, inputMode, stepGoal, vibe, customVibe, numStops, freeOnly, companion, avoidSlopes, maxBudget, saveWander]);
 
   const handleReset = useCallback(() => {
     setRouteData(null);
@@ -3127,6 +3246,8 @@ export default function Home() {
           <PassportOverlay
             passport={passport}
             totalStops={totalStops}
+            streakDays={streakDays}
+            totalWanders={totalWanders}
             onClose={() => setPassportOpen(false)}
             onClear={() => { clearPassport(); setPassportOpen(false); }}
           />

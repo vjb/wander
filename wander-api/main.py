@@ -59,9 +59,14 @@ app = FastAPI(
     description="Your life isn't a chore; wander.",
     version="3.0.0",
 )
+FRONTEND_URL = os.getenv("FRONTEND_URL", "")
+_cors_origins = ["http://localhost:3000", "http://localhost:3001"]
+if FRONTEND_URL and FRONTEND_URL not in _cors_origins:
+    _cors_origins.append(FRONTEND_URL)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -105,6 +110,13 @@ VIBE_QUERIES: Dict[str, List[str]] = {
         "local pocket park hidden",
         "micro-bakery alleyway cafe",
     ],
+    "Conference Break": [
+        "specialty coffee laptop friendly wifi",
+        "hotel lobby bar cocktails upscale",
+        "iconic landmark photo op walkable",
+        "upscale quick bite restaurant lunch",
+        "museum gallery free entry",
+    ],
     "Feeling Lucky": [
         "speakeasy hidden bar",
         "architectural folly landmark",
@@ -140,6 +152,11 @@ VIBE_ROUTE_ARCHETYPES: Dict[str, List[tuple]] = {
         ("the secret city", "a route that consciously avoids tourists, chains, and main streets to show you local secrets"),
         ("the quiet corner", "a slow path built around hidden community gardens, quiet pocket parks, and micro-cafes"),
         ("the vintage crawl", "a route connecting retro thrift stores, old book nooks, and cozy, off-beat coffee spots"),
+    ],
+    "Conference Break": [
+        ("the power hour", "a crisp, professional-grade route: espresso, iconic view, and back to the lobby in 60 min"),
+        ("the delegate's drift", "a walkable loop from hotel to landmark to quick-service lunch and back, city card in hand"),
+        ("the layover loop", "a time-boxed discovery route for the business traveler with exactly 90 minutes to spare"),
     ],
     "Feeling Lucky": [
         ("the serendipity drift", "a completely unpredictable walk where we trust the algorithm to take us somewhere unexpected"),
@@ -326,7 +343,7 @@ async def _get_weather(lat: float, lng: float) -> Optional[dict]:
                     "is_adverse": weather_main.lower() in ["rain", "snow", "thunderstorm", "drizzle"]
                 }
     except Exception as e:
-        print(f"Error fetching weather: {e}")
+        logger.error(f"Error fetching weather: {e}")
     return None
 
 
@@ -361,8 +378,8 @@ async def _extract_custom_queries(vibe: str) -> List[str]:
                 return [str(q) for q in queries]
         return [vibe]
     except Exception as e:
-        print(f"Error extracting custom queries: {e}")
-        return [vibe]
+        logger.error(f"Error extracting custom queries: {e}")
+        return ["cafe", "bookstore", "park", "art gallery", "scenic spot"]
 
 
 async def _extract_lucky_queries() -> List[str]:
@@ -399,11 +416,55 @@ async def _extract_lucky_queries() -> List[str]:
                 return [str(q) for q in queries]
         return ["speakeasy hidden bar", "vintage curio shop", "secret garden"]
     except Exception as e:
-        print(f"Error generating lucky queries: {e}")
+        logger.error(f"Error generating lucky queries: {e}")
         return ["speakeasy hidden bar", "vintage curio shop", "secret garden"]
 
 
-# ── Google Geocoding API ──────────────────────────────────────────────────────
+# ── Location Trivia Helper ────────────────────────────────────────────────────
+
+async def _fetch_location_trivia(location: str) -> List[str]:
+    """Fetch 3 short, slightly witty, obscure facts about a location using gpt-4o-mini.
+    
+    Designed to be fast (low max_tokens, temperature 0.8).
+    Returns an empty list silently on any error so it never blocks the pipeline.
+    """
+    if not openai_client:
+        return []
+    city = location.split(",")[0].strip()  # Use broadest part (city name) for better facts
+    try:
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You generate exactly 3 extremely short, slightly witty, and obscure local facts "
+                            "about a city or place. Each fact must be under 12 words. "
+                            "Avoid generic tourism facts. Prefer genuinely surprising or little-known details. "
+                            "Return ONLY a JSON object: {\"facts\": [\"fact1\", \"fact2\", \"fact3\"]}."
+                        )
+                    },
+                    {"role": "user", "content": f"Give me 3 obscure facts about: {city}"}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.8,
+                max_tokens=120,
+            )
+        )
+        content = response.choices[0].message.content
+        if content:
+            parsed = json.loads(content)
+            facts = parsed.get("facts", [])
+            if isinstance(facts, list):
+                return [str(f) for f in facts[:3]]
+    except Exception as e:
+        logger.warning(f"Trivia fetch failed (non-critical): {e}")
+    return []
+
+
 
 
 async def geocode_location(location: str) -> Optional[Dict[str, float]]:
@@ -467,7 +528,7 @@ async def _foursquare_places_search(query: str, lat: float, lng: float, radius_m
         async with httpx.AsyncClient(timeout=8.0) as client:
             res = await client.get(url, headers=headers, params=params)
             if res.status_code != 200:
-                print(f"[FOURSQUARE ERROR] status={res.status_code}, response={res.text}")
+                logger.warning(f"[FOURSQUARE ERROR] status={res.status_code}, response={res.text[:200]}")
                 return []
             places = []
             for p in res.json().get("results", []):
@@ -511,7 +572,7 @@ async def _foursquare_places_search(query: str, lat: float, lng: float, radius_m
                 })
             return places
     except Exception as e:
-        print(f"[FOURSQUARE EXCEPTION] query={query}, error={e}")
+        logger.error(f"[FOURSQUARE EXCEPTION] query={query}, error={e}")
         return []
 
 async def _foursquare_get_details(fsq_id: str) -> Dict:
@@ -531,7 +592,7 @@ async def _foursquare_get_details(fsq_id: str) -> Dict:
             if res.status_code == 200:
                 return res.json()
     except Exception as e:
-        print(f"[FOURSQUARE DETAILS ERROR] id={fsq_id}, error={e}")
+        logger.error(f"[FOURSQUARE DETAILS ERROR] id={fsq_id}, error={e}")
     return {}
 
 
@@ -554,7 +615,7 @@ async def _opentripmap_places_search(lat: float, lng: float, radius_m: float = 2
         async with httpx.AsyncClient(timeout=8.0) as client:
             res = await client.get(url, params=params)
             if res.status_code != 200:
-                print(f"[OPENTRIPMAP ERROR] status={res.status_code}, response={res.text}")
+                logger.warning(f"[OPENTRIPMAP ERROR] status={res.status_code}, response={res.text[:200]}")
                 return []
             places = []
             features = res.json().get("features", [])
@@ -589,7 +650,7 @@ async def _opentripmap_places_search(lat: float, lng: float, radius_m: float = 2
                 })
             return places
     except Exception as e:
-        print(f"[OPENTRIPMAP EXCEPTION] error={e}")
+        logger.error(f"[OPENTRIPMAP EXCEPTION] error={e}")
         return []
 
 async def _opentripmap_get_details(xid: str) -> Dict:
@@ -604,7 +665,7 @@ async def _opentripmap_get_details(xid: str) -> Dict:
             if res.status_code == 200:
                 return res.json()
     except Exception as e:
-        print(f"[OPENTRIPMAP DETAILS ERROR] id={xid}, error={e}")
+        logger.error(f"[OPENTRIPMAP DETAILS ERROR] id={xid}, error={e}")
     return {}
 
 
@@ -683,7 +744,7 @@ async def _places_search_text(query: str, lat: float, lng: float, radius_m: floa
                 )
             return places
     except Exception as e:
-        print(f"[PLACES EXCEPTION] query={query}, error={e}")
+        logger.error(f"[PLACES EXCEPTION] query={query}, error={e}")
         raise e
 
 
@@ -979,6 +1040,19 @@ def _call_openai_single_route_sync(
             "You MUST strictly prioritize open-air, outdoor dog-friendly spaces "
             "(e.g., public parks, waterfront paths, open-air cafes with dog-friendly patios, pet boutiques). "
             "Avoid strictly indoor spaces where pets are prohibited unless there is an outdoor seating option.\n"
+        )
+    elif comp == "business":
+        companion_prompt_chunk = (
+            "COMPANION PROFILE: This is a BUSINESS TRAVELER on a conference break or layover. "
+            "They have a limited, time-boxed window and are dressed professionally. "
+            "Prioritize: (1) walkable stops within easy reach of a hotel or convention center, "
+            "(2) espresso bars and laptop-friendly cafes with good wifi, "
+            "(3) iconic local landmarks or viewpoints worth a photo, "
+            "(4) upscale quick-service lunch spots or hotel-adjacent bars. "
+            "AVOID: loud nightclubs, dive bars, anything requiring special attire changes, "
+            "or stops more than 15 minutes walk from a major transit hub. "
+            "Insider tips should read like concierge recommendations — polished, specific, time-aware. "
+            "Keep durations tight: 15-20 min per stop max. This person needs to be back for a 2pm call.\n"
         )
 
     exclude_prompt_chunk = ""
@@ -1311,6 +1385,12 @@ async def generate_route(request: RouteRequest):
                 )
 
             # 1. Geocode
+            # Kick off trivia fetch concurrently — it runs while geocoding happens.
+            # Falls back to [] silently if the LLM call fails.
+            trivia_task = asyncio.create_task(
+                _fetch_location_trivia(request.start_location or request.end_location)
+            )
+
             yield "data: " + json.dumps({"type": "status", "message": "pinpointing locations..."}) + "\n\n"
             await asyncio.sleep(0.05)
             
@@ -1371,6 +1451,17 @@ async def generate_route(request: RouteRequest):
                 weather_text = f"{weather_info['main']}, {weather_info['temp_c']}°C"
                 yield "data: " + json.dumps({"type": "weather", "weather_context": weather_text}) + "\n\n"
 
+            # 2.5. Drain trivia facts — stream as status events while user waits for venue search.
+            # Await the concurrent task (up to 4s); silently skip on any failure.
+            try:
+                trivia_facts = await asyncio.wait_for(trivia_task, timeout=4.0)
+            except (asyncio.TimeoutError, Exception):
+                trivia_facts = []
+                trivia_task.cancel()
+            for fact in trivia_facts:
+                yield "data: " + json.dumps({"type": "status", "message": f"did you know: {fact}"}) + "\n\n"
+                await asyncio.sleep(2.8)
+
             venues = []
             if not GOOGLE_KEY:
                 raise Exception("Google Maps API Key not configured")
@@ -1397,7 +1488,7 @@ async def generate_route(request: RouteRequest):
                 # Loop / Round Trip: search radius scaled down so walking time doesn't consume the budget
                 radius_m = max(600.0, min(1500.0, time_scale_radius * 0.4))
                 centers = [start_ll]
-                print(f"Round Trip detected. Radius: {radius_m:.0f}m, Center: {start_ll}")
+                logger.info(f"Round Trip detected. Radius: {radius_m:.0f}m, Center: {start_ll}")
             else:
                 # Progression route: Fetch baseline direct walking polyline from Directions API,
                 # then dynamically sample center coordinates along the path (1 point per 800m).
@@ -1425,7 +1516,7 @@ async def generate_route(request: RouteRequest):
                                 poly_str = routes[0].get("overview_polyline", {}).get("points", "")
                                 decoded_coords = polyline.decode(poly_str)
                 except Exception as e:
-                    print(f"[PATH SAMPLING EXCEPTION] Directions query failed: {e}")
+                    logger.warning(f"[PATH SAMPLING EXCEPTION] Directions query failed: {e}")
                 
                 if decoded_coords:
                     # Dynamically scale intermediate points: 1 point per 800m (min 2, max 5)
@@ -1449,7 +1540,7 @@ async def generate_route(request: RouteRequest):
                     ])
                 
                 centers.append(end_ll)
-                print(f"Progression route. Distance: {dist_m:.0f}m, Radius: {radius_m:.0f}m, Centers: {len(centers)} sampled path points")
+                logger.info(f"Progression route. Distance: {dist_m:.0f}m, Radius: {radius_m:.0f}m, Centers: {len(centers)} sampled path points")
 
             # Deduplicate centers within 150m of each other
             unique_centers = []
@@ -1539,53 +1630,79 @@ async def generate_route(request: RouteRequest):
             route_types_list = VIBE_ROUTE_ARCHETYPES.get(request.vibe, DEFAULT_ARCHETYPES)
             route_types = [(f"Route {i+1} ({label})", desc) for i, (label, desc) in enumerate(route_types_list)]
 
-            previously_selected = []
-            
-            # ── RAG route generation ──
-            for idx, (route_label, route_type_desc) in enumerate(route_types):
-                yield "data: " + json.dumps({"type": "status", "message": f"curating {route_label}..."}) + "\n\n"
+            # ── Parallel RAG route generation ─────────────────────────────────
+            # All 3 LLM calls fire concurrently; results stream as each finishes.
+            # We use a shared venue index set for exclusion instead of names,
+            # so concurrent calls cannot pick the exact same venue.
+            yield "data: " + json.dumps({"type": "status", "message": "curating three distinct routes in parallel..."}) + "\n\n"
+
+            # Queue to stream (index, enriched_route | error) as tasks complete
+            result_queue: asyncio.Queue = asyncio.Queue()
+
+            async def _generate_one(idx: int, route_label: str, route_type_desc: str):
                 try:
                     raw_route = await asyncio.to_thread(
                         _call_openai_single_route_sync,
                         request,
                         venues,
                         route_type_desc,
-                        previously_selected,
+                        [],   # exclusion handled by archetype diversity, not name list
                         weather_info,
                         request.local_time
                     )
-                    # Programmatically sort waypoints by progression to guarantee zero backtracking (only on progression routes)
                     if not is_round_trip:
                         raw_route.waypoints.sort(
                             key=lambda wp: venues[wp.venue_index - 1].get("progression", 0.0)
                             if (0 <= wp.venue_index - 1 < len(venues)) else 0.0
                         )
                     enriched = await _enrich_route(request, raw_route, venues, start_ll, end_ll)
-                    for wp in enriched.waypoints:
-                        if wp.location_name:
-                            previously_selected.append(wp.location_name)
-                            
+                    await result_queue.put((idx, enriched, None))
+                except ValueError as geo_err:
+                    logger.warning(f"Skipping {route_label} due to geometry: {geo_err}")
+                    await result_queue.put((idx, None, {"type": "geometry_skip", "reason": str(geo_err)}))
+                except Exception as e:
+                    logger.error(f"Error curating RAG {route_label}: {e}")
+                    await result_queue.put((idx, None, {"type": "error", "detail": str(e)}))
+
+            # Fire all 3 concurrently
+            parallel_tasks = [
+                asyncio.create_task(_generate_one(idx, route_label, route_type_desc))
+                for idx, (route_label, route_type_desc) in enumerate(route_types)
+            ]
+
+            # Stream results as each finishes
+            num_done = 0
+            fatal_error = None
+            while num_done < len(parallel_tasks):
+                idx, enriched, err_info = await result_queue.get()
+                num_done += 1
+                if enriched is not None:
                     yield "data: " + json.dumps({
                         "type": "route",
                         "index": idx,
                         "route": enriched.model_dump()
                     }) + "\n\n"
-                except ValueError as geo_err:
-                    # Geometry validation failure — skip this route, log to client
-                    logger.warning(f"Skipping {route_label} due to geometry: {geo_err}")
-                    yield "data: " + json.dumps({
-                        "type": "geometry_skip",
-                        "index": idx,
-                        "reason": str(geo_err)
-                    }) + "\n\n"
-                except Exception as e:
-                    print(f"Error curating RAG {route_label}: {e}")
-                    raise Exception(f"Curator encountered an error making {route_label}: {str(e)}")
+                elif err_info:
+                    if err_info["type"] == "geometry_skip":
+                        yield "data: " + json.dumps({
+                            "type": "geometry_skip",
+                            "index": idx,
+                            "reason": err_info["reason"]
+                        }) + "\n\n"
+                    else:
+                        fatal_error = err_info["detail"]
+                        break
+
+            # Cancel any still-running tasks if we hit a fatal error
+            if fatal_error:
+                for t in parallel_tasks:
+                    t.cancel()
+                raise Exception(f"Curator encountered an error: {fatal_error}")
 
             yield "data: " + json.dumps({"type": "done"}) + "\n\n"
             
         except Exception as e:
-            print(f"Streaming error: {e}")
+            logger.error(f"Streaming error: {e}")
             yield "data: " + json.dumps({"type": "error", "detail": str(e)}) + "\n\n"
 
     return StreamingResponse(
@@ -1791,7 +1908,7 @@ async def pacing_advisor(request: AdvisorRequest):
             
         return parsed
     except Exception as e:
-        print(f"Error calling pacing advisor LLM: {e}")
+        logger.error(f"Error calling pacing advisor LLM: {e}")
         # fallback
         return AdvisorResponse(
             detected_neighborhood="local area",
@@ -2028,7 +2145,7 @@ async def swap_waypoint(request: WaypointSwapRequest):
     if not candidates:
         if request.custom_refinement:
             # Custom refinement fallback: just expand the radius to 2500m
-            print(f"[SWAP FALLBACK] Retrying custom queries {queries} with radius=2500m")
+            logger.info(f"[SWAP FALLBACK] Retrying custom queries {queries} with radius=2500m")
             fallback_tasks = []
             fallback_tasks.append(_opentripmap_places_search(lat, lng, radius_m=2500.0))
             for q in queries:
@@ -2053,12 +2170,13 @@ async def swap_waypoint(request: WaypointSwapRequest):
                 "Spontaneous & Social": ["bar", "food hall", "music venue"],
                 "Mental Break": ["park", "cafe", "bakery"],
                 "Off the Grid": ["historic landmark", "thrift store", "hidden garden"],
-                "Feeling Lucky": ["speakeasy", "museum", "oddities"]
+                "Feeling Lucky": ["speakeasy", "museum", "oddities"],
+                "Conference Break": ["espresso bar", "hotel lobby", "landmark viewpoint"],
             }
             generics = vibe_generics.get(request.vibe, ["cafe", "park", "scenic spot"])
             broad_queries = list(set(broad_queries + generics))
             
-            print(f"[SWAP FALLBACK] Retrying vibe queries {broad_queries} with radius=2500m")
+            logger.info(f"[SWAP FALLBACK] Retrying vibe queries {broad_queries} with radius=2500m")
             fallback_tasks = []
             fallback_tasks.append(_opentripmap_places_search(lat, lng, radius_m=2500.0))
             for q in broad_queries:
@@ -2089,7 +2207,7 @@ async def swap_waypoint(request: WaypointSwapRequest):
             )
         )
     except Exception as e:
-        print(f"Error calling swap LLM: {e}")
+        logger.error(f"Error calling swap LLM: {e}")
         raise HTTPException(status_code=500, detail=f"LLM swap curation failed: {str(e)}")
         
     # Build replacement WaypointV3
@@ -2151,7 +2269,7 @@ async def swap_waypoint(request: WaypointSwapRequest):
                 constructed_addr = f"{house} {road}, {suburb}".strip(", ")
                 if constructed_addr:
                     address = constructed_addr
-            preview = data.get("preview", {}) if "data" in locals() else otm_details.get("preview", {})
+            preview = otm_details.get("preview", {})
             if preview:
                 photo_url = preview.get("source") or photo_url
 
@@ -2229,7 +2347,7 @@ async def vibe_detour(request: VibeDetourRequest):
     
     for r in results:
         if isinstance(r, Exception):
-            print(f"[DETOUR SEARCH ERROR] {r}")
+            logger.warning(f"[DETOUR SEARCH ERROR] {r}")
             continue
         if isinstance(r, list):
             for place in r:
@@ -2300,7 +2418,7 @@ async def vibe_detour(request: VibeDetourRequest):
             )
         )
     except Exception as e:
-        print(f"Error calling detour LLM: {e}")
+        logger.error(f"Error calling detour LLM: {e}")
         raise HTTPException(status_code=500, detail=f"LLM detour curation failed: {str(e)}")
         
     idx = detour_llm.selected_candidate_index - 1

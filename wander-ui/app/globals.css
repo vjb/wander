@@ -98,6 +98,10 @@ input:focus {
   100% { background-position: 200% center; }
 }
 
+.animate-shimmer {
+  animation: shimmer 1.8s linear infinite;
+}
+
 .animate-breathe {
   animation: breathe 3s ease-in-out infinite;
 }
