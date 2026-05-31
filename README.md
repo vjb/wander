@@ -10,9 +10,9 @@ A multi-stop walking route planner that generates three distinct themed itinerar
 
 ## How It Works
 
-wander accepts a starting location, an ending location, a time budget, and a desired vibe.
+wander accepts starting and destination parameters to dynamically structure walking tours.
 
-**1. Configure parameters**: Enter your starting location and destination (or select round-trip to lock them), vibe profile, stop count (from 2 to 5), and time budget. Vibe profiles include **Feeling Lucky** (which bypasses specific category filters to construct unique itineraries with speakeasies, oddities museums, and architectural landmarks) or custom text descriptions. An inline pacing advisor validates if target parameters match physical walking geometry.
+**1. Configure parameters**: Enter your starting location and destination (or select round-trip to lock them), vibe profile, stop count (from 2 to 5), time budget, **maximum per-person budget**, and **steep slope avoidance toggle**. An inline pacing advisor validates if target parameters match physical walking geometry.
 
 <div align="center">
   <img src="assets/crop-03-form-filled.png" width="660" alt="Form parameters with pacing validation alert" />
@@ -20,7 +20,7 @@ wander accepts a starting location, an ending location, a time budget, and a des
 
 <br/>
 
-**2. Stream and compare three routes**: The application queries the Google Places API along the route corridor to identify venues and streams three distinct walking itineraries:
+**2. Stream and compare three routes**: The application queries the Google Directions API to fetch the baseline direct path, decodes the polyline, dynamically samples 2-5 intermediate center coordinates based on the route distance (1 point per 800m), and runs tight parallel Google Places sweeps (400m radius restriction). The engine then streams three distinct themed walking itineraries:
 * **Route 1 (Scenic and Relaxed)**: Prioritizes parks, waterfront paths, and low-traffic streets.
 * **Route 2 (Culturally Dense)**: Integrates bookstores, art galleries, and historic landmarks.
 * **Route 3 (Social and Lively)**: Incorporates cafes, food halls, local vendors, and bars.
@@ -31,7 +31,7 @@ wander accepts a starting location, an ending location, a time budget, and a des
 
 <br/>
 
-**3. Fine-tune your stops**: To modify a specific stop, click **swap stop** on its card. The planner supports a "Surprise Me" replacement matching the active vibe, or a custom text requirement (such as "bakery instead of coffee"). The backend queries candidate venues, invokes GPT-4o to select and curate the node, and recalculates walking leg durations, map coordinates, and navigation links.
+**3. Fine-tune your stops**: To modify a specific stop, click **swap stop** on its card. The planner supports a "Surprise Me" replacement matching the active vibe, or a custom text requirement (such as "bakery instead of coffee"), while respecting your remaining budget limit. The backend queries candidate venues, invokes GPT-4o to select and curate the node, and recalculates walking leg durations, map coordinates, and navigation links.
 
 <div align="center">
   <img src="assets/screenshot-05-stops.png" width="720" alt="Subbing out a place: waypoint card showing inline swap stop popover with Surprise Me and custom request" />
@@ -39,7 +39,7 @@ wander accepts a starting location, an ending location, a time budget, and a des
 
 <br/>
 
-**4. Start navigation**: Clicking **Start Wandering** generates a Google Maps multi-stop directions link pre-populated with Place IDs for turn-by-turn navigation. Itineraries can also be downloaded as .ics calendar events with locations and deep links.
+**4. Start navigation**: Clicking **Start Wandering** opens a Google Maps walking directions link pre-populated with Place IDs. Itineraries can also be downloaded as `.ics` calendar events. Alternatively, activate **Live Walk Mode** inside the app for real-time proximity stamps and shake-to-trigger **Spontaneous Vibe Detours**.
 
 <div align="center">
   <img src="assets/map-handoff.png" width="720" alt="Google Maps integration: turn-by-turn walking navigation with pre-loaded stops" />
@@ -47,7 +47,7 @@ wander accepts a starting location, an ending location, a time budget, and a des
 
 ---
 
-## User Interaction & Flow
+## System Sequence Flow
 
 The following sequence diagram tracks the lifecycle of user actions, route generation, inline stop swapping, and spontaneous detour pivots:
 
