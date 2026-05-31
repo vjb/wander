@@ -879,15 +879,23 @@ def build_maps_deep_link(
         f"&waypoints={wp_str}"
         f"&travelmode=walking"
     )
-    if waypoint_place_ids:
-        # Filter out custom non-Google place IDs
-        valid_pids = [
-            pid.strip() for pid in waypoint_place_ids
-            if pid and not (pid.startswith("otm:") or pid.startswith("fsq:"))
-        ]
-        pids_str = "|".join(quote_plus(pid) for pid in valid_pids)
-        if pids_str:
-            url += f"&waypoint_place_ids={pids_str}"
+    if waypoint_place_ids and len(waypoint_place_ids) == len(waypoints):
+        has_all_valid = True
+        valid_pids = []
+        for pid in waypoint_place_ids:
+            if not pid or not isinstance(pid, str):
+                has_all_valid = False
+                break
+            pid_stripped = pid.strip()
+            if not pid_stripped or pid_stripped.startswith("otm:") or pid_stripped.startswith("fsq:"):
+                has_all_valid = False
+                break
+            valid_pids.append(pid_stripped)
+            
+        if has_all_valid:
+            pids_str = "|".join(quote_plus(pid) for pid in valid_pids)
+            if pids_str:
+                url += f"&waypoint_place_ids={pids_str}"
     return url
 
 
@@ -1270,7 +1278,7 @@ async def _enrich_route(
             f"{start_ll['lat']},{start_ll['lng']}" if start_ll else request.start_location,
             f"{end_ll['lat']},{end_ll['lng']}" if end_ll else request.end_location,
             [f"{w.lat},{w.lng}" if (w.lat is not None and w.lng is not None) else w.address_hint for w in waypoints],
-            [w.place_id for w in waypoints if w.place_id],
+            [w.place_id for w in waypoints],
         ),
         estimated_total_cost_usd=estimated_total_cost_usd,
     )
@@ -2144,7 +2152,7 @@ async def swap_waypoint(request: WaypointSwapRequest):
         f"{route.start_lat},{route.start_lng}" if (route.start_lat is not None) else route.start_location,
         f"{route.end_lat},{route.end_lng}" if (route.end_lat is not None) else route.end_location,
         [f"{w.lat},{w.lng}" if (w.lat is not None and w.lng is not None) else w.address_hint for w in route.waypoints],
-        [w.place_id for w in route.waypoints if w.place_id],
+        [w.place_id for w in route.waypoints],
     )
     
     return route
@@ -2383,7 +2391,7 @@ async def pivot_route(request: RoutePivotRequest):
         f"{route.start_lat},{route.start_lng}" if (route.start_lat is not None) else route.start_location,
         f"{route.end_lat},{route.end_lng}" if (route.end_lat is not None) else route.end_location,
         [f"{w.lat},{w.lng}" if (w.lat is not None and w.lng is not None) else w.address_hint for w in route.waypoints],
-        [w.place_id for w in route.waypoints if w.place_id],
+        [w.place_id for w in route.waypoints],
     )
     
     return route
