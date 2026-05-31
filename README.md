@@ -199,7 +199,7 @@ User Request (start, end, time_budget, vibe, local_time)
 All prompt templates are defined directly in the backend code. Below are the key prompts with direct links to the codebase:
 
 ### 1. Vibe Query Keyword Extractor (GPT-4o-mini)
-* **Code Link**: [main.py:L341-354](file:///c:/Users/vjbel/hacks/wander/wander-api/main.py#L341-L354)
+* **Code Link**: [wander-api/main.py#L341-L354](wander-api/main.py#L341-L354)
 * **Model**: `gpt-4o-mini` (low latency, high classification accuracy)
 * **Goal**: Parses natural language vibe text descriptions into structured Google Places search queries.
 * **System Prompt**:
@@ -208,7 +208,7 @@ You are an assistant that extracts specific Google Maps Places search terms from
 ```
 
 ### 2. Feeling Lucky surprise generator (GPT-4o-mini)
-* **Code Link**: [main.py:L374-392](file:///c:/Users/vjbel/hacks/wander/wander-api/main.py#L374-L392)
+* **Code Link**: [wander-api/main.py#L374-L392](wander-api/main.py#L374-L392)
 * **Model**: `gpt-4o-mini`
 * **Goal**: Generates a quirky, surprising themed set of queries when the user chooses "Feeling Lucky".
 * **System Prompt**:
@@ -217,7 +217,7 @@ You are an urban exploration planner. The user clicked 'I'm Feeling Lucky'. Crea
 ```
 
 ### 3. Route Generator & Curator (GPT-4o)
-* **Code Link**: [main.py:L905-1087](file:///c:/Users/vjbel/hacks/wander/wander-api/main.py#L905-L1087)
+* **Code Link**: [wander-api/main.py#L905-L1087](wander-api/main.py#L905-L1087)
 * **Model**: `gpt-4o` (for complex RAG reasoning, time partitioning, and geographic constraints)
 * **Goal**: Selects the sequence of stops from the verified radar sweep results and curates the timeline.
 * **Prompt Architecture**:
@@ -227,13 +227,13 @@ You are an urban exploration planner. The user clicked 'I'm Feeling Lucky'. Crea
   * **Pydantic Validation Schema**: Evaluates route details directly into `DynamicRouteOptionLLM` with fields for `route_name`, `theme_summary`, and waypoint arrays.
 
 ### 4. Stop Swapping Replacement Curator (GPT-4o)
-* **Code Link**: [main.py:L1854-1920](file:///c:/Users/vjbel/hacks/wander/wander-api/main.py#L1854-L1920)
+* **Code Link**: [wander-api/main.py#L1854-L1920](wander-api/main.py#L1854-L1920)
 * **Model**: `gpt-4o`
 * **Goal**: Selects and curates a replacement stop when a user rejects a specific waypoint.
 * **Prompt Details**: Recalls the active route name, other stops, target swap target, any custom user refinement (e.g. "bakery instead of coffee"), remaining budget, and the alternative candidates list. Forces logistic compatibility (cannot backtrack between target index - 1 and target index + 1).
 
 ### 5. Spontaneous Detour Curation (GPT-4o)
-* **Code Link**: [main.py:L1925-1965](file:///c:/Users/vjbel/hacks/wander/wander-api/main.py#L1925-L1965)
+* **Code Link**: [wander-api/main.py#L1925-L1965](wander-api/main.py#L1925-L1965)
 * **Model**: `gpt-4o`
 * **Goal**: Chooses the single best spontaneous local detour from Foursquare (commercial) or OpenTripMap (cultural) candidates when walking.
 
