@@ -430,7 +430,7 @@ function InputScreen({
             <p className="text-[#f4f4f5]/40 text-[12px] font-medium tracking-widest uppercase mb-4" style={{ fontFamily: "var(--font-inter)" }}>
               your vibe
             </p>
-            {/* e) Show badge when custom vibe overrides presets */}
+            {/* e) Show badge when custom vibe is active */}
             {customVibe.trim() && (
               <div className="flex items-center gap-2 mb-3">
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#8ba88e]/12 border border-[#8ba88e]/30 text-[#8ba88e] text-[11px] font-medium" style={{ fontFamily: "var(--font-inter)" }}>
@@ -2128,9 +2128,9 @@ export default function Home() {
     }, 900);
 
     return () => clearTimeout(timer);
-  // Companion is intentionally excluded: changing companion (e.g. via preset click)
-  // should NOT re-run the distance/feasibility check. Companion is still sent in
-  // the request body via the closure — it just won't act as a trigger.
+  // Companion is intentionally excluded: changing companion should NOT re-run the
+  // distance/feasibility check. Companion is still sent in the request body
+  // via the closure — it just won't act as a trigger.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [start, end]);
 

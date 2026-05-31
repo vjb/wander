@@ -22,9 +22,6 @@ $a = 'c:\Users\vjbel\hacks\wander\assets'
 # 01-landing: Center the full hero + card
 Crop-Img "$a\screenshot-01-landing.png" "$a\crop-01-landing.png" 340 15 980 860
 
-# 02-presets: App card center with suggested wanders
-Crop-Img "$a\screenshot-02-presets.png" "$a\crop-02-presets.png" 570 10 780 1030
-
 # 03-form-filled: Form with custom options and vibe selected
 Crop-Img "$a\screenshot-03-form-filled.png" "$a\crop-03-form-filled.png" 570 150 780 900
 
