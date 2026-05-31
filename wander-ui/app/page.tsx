@@ -37,7 +37,7 @@ import { usePassport, type PassportEntry } from "./hooks/usePassport";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Screen = "input" | "loading" | "route";
-type VibeId = "Caffeinated & Cultured" | "Green & Scenic" | "Spontaneous & Social" | "Mental Break";
+type VibeId = "Caffeinated & Cultured" | "Green & Scenic" | "Spontaneous & Social" | "Mental Break" | "Off the Grid" | "Feeling Lucky";
 
 export type { PassportEntry };
 
@@ -85,16 +85,6 @@ interface AdvisorResponse {
   feasibility_status: "optimal" | "tight" | "impossible";
   density_badge_message: string;
   weather_advice: string | null;
-}
-
-interface PresetOption {
-  title: string;
-  vibe: string;
-  time_budget: number;
-  num_stops: number;
-  free_only: boolean;
-  companion: string;
-  reason: string;
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -148,6 +138,26 @@ const VIBES: {
     activeBg: "bg-sky-400/8",
     activeGlow: "shadow-[0_0_24px_rgba(125,211,252,0.18)]",
     activeText: "text-sky-300",
+  },
+  {
+    id: "Off the Grid",
+    emoji: "🗺️",
+    label: "Off the Grid",
+    sub: "Secret garden · Indie bookshops · Hidden gems",
+    activeBorder: "border-emerald-500/40",
+    activeBg: "bg-emerald-500/8",
+    activeGlow: "shadow-[0_0_24px_rgba(16,185,129,0.18)]",
+    activeText: "text-emerald-300",
+  },
+  {
+    id: "Feeling Lucky",
+    emoji: "🎲",
+    label: "Feeling Lucky",
+    sub: "Surprise theme · Unexpected routes · Oddities",
+    activeBorder: "border-rose-400/40",
+    activeBg: "bg-rose-400/8",
+    activeGlow: "shadow-[0_0_24px_rgba(251,113,133,0.18)]",
+    activeText: "text-rose-300",
   },
 ];
 
@@ -210,9 +220,6 @@ function InputScreen({
   numStops, setNumStops,
   freeOnly, setFreeOnly,
   advisorData, advisorLoading, clientFeasibility,
-  presets, presetsLoading,
-  presetsRefreshing, onRefreshPresets,
-  selectedPresetIdx, setSelectedPresetIdx,
   companion, setCompanion,
   setHasManuallySetStops,
   passportCount,
@@ -235,12 +242,6 @@ function InputScreen({
   advisorData: AdvisorResponse | null;
   advisorLoading: boolean;
   clientFeasibility: { status: "impossible" | "tight"; message: string } | null;
-  presets: PresetOption[];
-  presetsLoading: boolean;
-  presetsRefreshing: boolean;
-  onRefreshPresets: () => void;
-  selectedPresetIdx: number | null;
-  setSelectedPresetIdx: (v: number | null) => void;
   companion: string;
   setCompanion: (v: string) => void;
   setHasManuallySetStops: (v: boolean) => void;
@@ -396,105 +397,7 @@ function InputScreen({
             )}
           </div>
 
-          {/* Presets Carousel — hidden when advisor has already flagged impossible */}
-          {start.trim().length > 0 && (presetsLoading || presets.length > 0) && advisorData?.feasibility_status !== "impossible" && (
-            <div className="mb-8 border-t border-[#f4f4f5]/6 pt-6">
-              <div className="flex items-center justify-between mb-4">
-                <p className="flex items-center gap-2 text-[#f4f4f5]/40 text-[11px] font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-inter)" }}>
-                  <Sparkles className="w-3.5 h-3.5 text-[#8ba88e]" strokeWidth={1.5} />
-                  suggested wanders for you
-                </p>
-                <button
-                  onClick={onRefreshPresets}
-                  disabled={presetsLoading || presetsRefreshing}
-                  className="p-1 rounded-full text-[#8ba88e]/50 hover:text-[#8ba88e] hover:bg-[#8ba88e]/10 transition-all disabled:opacity-30"
-                  title="get new suggestions"
-                >
-                  <RotateCcw className={`w-3.5 h-3.5 ${presetsRefreshing ? 'animate-spin' : ''}`} strokeWidth={1.5} />
-                </button>
-              </div>
-              
-              <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x">
-                {presetsLoading ? (
-                  Array.from({ length: 3 }).map((_, idx) => (
-                    <div 
-                      key={idx} 
-                      className="w-[200px] shrink-0 glass border border-[#f4f4f5]/6 rounded-2xl p-4 animate-pulse flex flex-col gap-2.5 min-h-[110px]"
-                    >
-                      <div className="h-4 bg-[#f4f4f5]/10 rounded w-3/4" />
-                      <div className="h-3 bg-[#f4f4f5]/5 rounded w-5/6" />
-                      <div className="flex gap-2">
-                        <div className="h-5 bg-[#f4f4f5]/10 rounded-full w-12" />
-                        <div className="h-5 bg-[#f4f4f5]/10 rounded-full w-16" />
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  presets.map((preset, idx) => {
-                    const companionEmojis: Record<string, string> = {
-                      solo: "🧍",
-                      date: "🕯️",
-                      friends: "🍻",
-                      pet: "🐶"
-                    };
-                    
-                    return (
-                      <motion.button
-                        key={idx}
-                        type="button"
-                        onClick={() => {
-                          setCustomVibe(preset.vibe);
-                          setVibe("");
-                          setTimeBudget(preset.time_budget);
-                          setNumStops(preset.num_stops);
-                          setHasManuallySetStops(false);
-                          setFreeOnly(preset.free_only);
-                          setCompanion(preset.companion);
-                          setSelectedPresetIdx(idx);
-                          // Scroll to wander button so user sees their selection applied
-                          setTimeout(() => {
-                            document.getElementById('wander-button')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                          }, 150);
-                        }}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        className={`w-[220px] shrink-0 glass border text-left p-4 rounded-2xl cursor-pointer transition-all duration-300 flex flex-col justify-between min-h-[125px] snap-start ${
-                          selectedPresetIdx === idx
-                            ? 'border-[#8ba88e]/60 shadow-[0_0_20px_rgba(139,168,142,0.2)] bg-[#8ba88e]/5'
-                            : 'border-[#f4f4f5]/6 hover:border-[#8ba88e]/30'
-                        }`}
-                      >
-                        <div>
-                          <h4 className="text-[#f4f4f5] text-[13px] font-semibold tracking-wide mb-1 lowercase" style={{ fontFamily: "var(--font-inter)" }}>
-                            {preset.title}
-                          </h4>
-                          <p className="text-[#f4f4f5]/50 text-[10px] leading-relaxed mb-3 lowercase font-light" style={{ fontFamily: "var(--font-inter)" }}>
-                            {preset.reason}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5 mt-auto">
-                          <span className="px-2 py-0.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/60 text-[9px] font-light uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>
-                            {companionEmojis[preset.companion] || "🧍"} {preset.companion}
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/60 text-[9px] font-light uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>
-                            📍 {preset.num_stops} stops
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/60 text-[9px] font-light uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>
-                            ⏱️ {preset.time_budget}m
-                          </span>
-                          {preset.free_only && (
-                            <span className="px-2 py-0.5 rounded-full bg-[#8ba88e]/10 text-[#8ba88e] text-[9px] font-medium uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>
-                              free
-                            </span>
-                          )}
-                        </div>
-                      </motion.button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          )}
+
 
           {/* Time Budget */}
           <div className="mb-8">
@@ -683,69 +586,24 @@ function InputScreen({
             </div>
           </div>
 
-          {/* AI Pacing & Feasibility Advisor */}
-          {start.trim().length > 0 && end.trim().length > 0 && (advisorLoading || advisorData) && (
-            <div className="mb-6">
-              {advisorLoading ? (
-                <div className="glass border border-[#f4f4f5]/6 rounded-2xl p-4 animate-pulse flex items-center gap-3">
-                  <Loader2 className="w-4 h-4 text-[#8ba88e] animate-spin shrink-0" />
-                  <span className="text-[#f4f4f5]/40 text-xs font-light lowercase" style={{ fontFamily: "var(--font-inter)" }}>
-                    reading your neighborhood...
-                  </span>
-                </div>
-              ) : (
-                advisorData && (() => {
-                  // Client-side override wins when sliders produce impossible/tight state
-                  const effectiveStatus = clientFeasibility?.status ?? advisorData.feasibility_status;
-                  const effectiveMessage = clientFeasibility?.message ?? advisorData.pacing_message;
-                  return (
-                    <motion.div
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className={`glass border-l-4 rounded-2xl p-4 shadow-md flex flex-col gap-2 ${
-                        effectiveStatus === "optimal"
-                          ? "border-l-[#8ba88e] border-y border-r border-[#f4f4f5]/6 bg-[#8ba88e]/2"
-                          : effectiveStatus === "tight"
-                          ? "border-l-[#e5d3b3] border-y border-r border-[#f4f4f5]/6 bg-[#e5d3b3]/2"
-                          : "border-l-[#ef4444] border-y border-r border-[#f4f4f5]/6 bg-[#ef4444]/2"
-                      }`}
-                    >
-                      <div className="flex items-start gap-2.5">
-                        <Sparkles className={`w-4 h-4 shrink-0 mt-0.5 ${
-                          effectiveStatus === "optimal"
-                            ? "text-[#8ba88e]"
-                            : effectiveStatus === "tight"
-                            ? "text-[#e5d3b3]"
-                            : "text-[#ef4444]"
-                        }`} strokeWidth={1.5} />
-                        <div className="flex-1">
-                          <p className="text-[#f4f4f5] text-[12px] font-normal leading-relaxed lowercase" style={{ fontFamily: "var(--font-inter)" }}>
-                            {effectiveMessage}
-                          </p>
-
-                          {/* Only show badges when not overridden by client */}
-                          {!clientFeasibility && (
-                            <div className="flex flex-wrap gap-2 mt-2">
-                              {advisorData.density_badge_message && (
-                                <span className="px-2 py-0.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/40 text-[9px] font-light lowercase" style={{ fontFamily: "var(--font-inter)" }}>
-                                  {advisorData.density_badge_message}
-                                </span>
-                              )}
-                              {advisorData.weather_advice && (
-                                <span className="px-2 py-0.5 rounded-full bg-[#8ba88e]/10 text-[#8ba88e]/80 text-[9px] font-light lowercase" style={{ fontFamily: "var(--font-inter)" }}>
-                                  ✨ {advisorData.weather_advice}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </motion.div>
-                  );
-                })()
-              )}
-            </div>
-          )}
+          {/* Feasibility check — only surface impossible, nothing else */}
+          {(() => {
+            const effectiveStatus = clientFeasibility?.status ?? advisorData?.feasibility_status;
+            const effectiveMessage = clientFeasibility?.message ?? advisorData?.pacing_message;
+            if (effectiveStatus !== "impossible") return null;
+            return (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-6 glass border-l-4 border-l-[#ef4444] border-y border-r border-[#f4f4f5]/6 rounded-2xl p-4 flex items-start gap-2.5"
+              >
+                <X className="w-4 h-4 text-[#ef4444] shrink-0 mt-0.5" strokeWidth={2} />
+                <p className="text-[#f4f4f5]/80 text-[12px] font-light leading-relaxed lowercase" style={{ fontFamily: "var(--font-inter)" }}>
+                  {effectiveMessage}
+                </p>
+              </motion.div>
+            );
+          })()}
 
           {/* f) Static hint above CTA when disabled */}
           {!canWander && (
@@ -1288,6 +1146,7 @@ export function RouteScreen({
   isSharedView = false,
   weatherContext,
   addPassportStamp,
+  comfortMode = false,
 }: {
   data: WanderV3Response;
   vibe: VibeId | "";
@@ -1295,9 +1154,19 @@ export function RouteScreen({
   isSharedView?: boolean;
   weatherContext?: string | null;
   addPassportStamp?: (entry: PassportEntry) => void;
+  comfortMode?: boolean;
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const activeRoute = data.routes[selectedIndex];
+
+  useEffect(() => {
+    if (!data.routes[selectedIndex]) {
+      const firstAvailableIdx = data.routes.findIndex(r => !!r);
+      if (firstAvailableIdx !== -1) {
+        setSelectedIndex(firstAvailableIdx);
+      }
+    }
+  }, [data.routes, selectedIndex]);
 
   const [isSharing, setIsSharing] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
@@ -2044,10 +1913,6 @@ export default function Home() {
   const [freeOnly, setFreeOnly] = useState<boolean>(false);
   const [advisorData, setAdvisorData] = useState<AdvisorResponse | null>(null);
   const [advisorLoading, setAdvisorLoading] = useState<boolean>(false);
-  const [presets, setPresets] = useState<PresetOption[]>([]);
-  const [presetsLoading, setPresetsLoading] = useState<boolean>(false);
-  const [presetsRefreshing, setPresetsRefreshing] = useState<boolean>(false);
-  const [selectedPresetIdx, setSelectedPresetIdx] = useState<number | null>(null);
   const [companion, setCompanion] = useState<string>("solo");
   const [isRoundTrip, setIsRoundTrip] = useState(false);
   const [comfortMode, setComfortMode] = useState(false);
@@ -2149,45 +2014,7 @@ export default function Home() {
     return null; // use server message
   })();
 
-  const fetchPresets = useCallback(async (isRefresh = false) => {
-    if (!start.trim()) {
-      setPresets([]);
-      return;
-    }
-    setPresetsLoading(true);
-    try {
-      const localTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const localDay = new Date().toLocaleDateString([], { weekday: 'long' });
-      const timeContext = `${localDay}, ${localTime}`;
 
-      const res = await fetch("/api/suggest-vibe-preset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          start_location: start,
-          local_time: timeContext,
-          refresh: isRefresh,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPresets(data.presets || []);
-      }
-    } catch (err) {
-      console.error("error fetching presets:", err);
-    } finally {
-      setPresetsLoading(false);
-    }
-  }, [start]);
-
-  useEffect(() => {
-    if (!start.trim()) {
-      setPresets([]);
-      return;
-    }
-    const timer = setTimeout(() => fetchPresets(false), 1000);
-    return () => clearTimeout(timer);
-  }, [start, fetchPresets]);
 
   useEffect(() => {
     if (screen !== "loading") return;
@@ -2271,10 +2098,8 @@ export default function Home() {
             currentRoutes[data.index] = data.route;
             setRouteData({ routes: currentRoutes });
 
-            // Switch screen to route view immediately when Route 1 is ready!
-            if (data.index === 0) {
-              setScreen("route");
-            }
+            // Switch screen to route view immediately when any route is ready!
+            setScreen("route");
           } else if (data.type === "error") {
             throw new Error(data.detail || "Server error curating routes");
           }
@@ -2324,7 +2149,7 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-[#131316] text-[#f4f4f5] relative overflow-x-hidden">
+    <main className={`min-h-screen bg-[#131316] text-[#f4f4f5] relative overflow-x-hidden${comfortMode ? ' comfort-mode' : ''}`}>
       <BackgroundOrbs />
       <AnimatePresence mode="wait">
         {screen === "input" && (
@@ -2348,16 +2173,6 @@ export default function Home() {
             advisorData={advisorData}
             advisorLoading={advisorLoading}
             clientFeasibility={clientFeasibility}
-            presets={presets}
-            presetsLoading={presetsLoading}
-            presetsRefreshing={presetsRefreshing}
-            onRefreshPresets={async () => {
-              setPresetsRefreshing(true);
-              await fetchPresets(true);
-              setPresetsRefreshing(false);
-            }}
-            selectedPresetIdx={selectedPresetIdx}
-            setSelectedPresetIdx={setSelectedPresetIdx}
             companion={companion}
             setCompanion={setCompanion}
             setHasManuallySetStops={setHasManuallySetStops}
@@ -2380,6 +2195,7 @@ export default function Home() {
             onReset={handleReset}
             weatherContext={weatherContext}
             addPassportStamp={addStamp}
+            comfortMode={comfortMode}
           />
         )}
       </AnimatePresence>

@@ -11,12 +11,16 @@ Architecture:
 
 import asyncio
 import json
+import logging
+import math
 import os
 from typing import Dict, List, Optional
 from urllib.parse import quote_plus
 
 import httpx
 from dotenv import load_dotenv
+
+logger = logging.getLogger("uvicorn.error")
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -90,6 +94,21 @@ VIBE_QUERIES: Dict[str, List[str]] = {
         "scenic overlook waterfront",
         "bakery local pastry",
     ],
+    "Off the Grid": [
+        "secret garden community",
+        "abandoned historic landmark scenic",
+        "vintage thrift clothing bookstore",
+        "indie zine shop record",
+        "local pocket park hidden",
+        "micro-bakery alleyway cafe",
+    ],
+    "Feeling Lucky": [
+        "speakeasy hidden bar",
+        "architectural folly landmark",
+        "unusual oddities museum curio",
+        "esoteric occult bookstore library",
+        "community garden art installation",
+    ],
 }
 
 # ── Vibe → Route Archetypes (Fix #9) ─────────────────────────────────────────
@@ -113,6 +132,16 @@ VIBE_ROUTE_ARCHETYPES: Dict[str, List[tuple]] = {
         ("the decompression loop", "a quiet, short route through pocket parks, a slow coffee, and fresh air"),
         ("the mindful stroll", "a gentle wander through serene green spaces and a calm neighborhood cafe"),
         ("the reset walk", "a focused micro-route: one good coffee, one quiet park bench, one breath of city air"),
+    ],
+    "Off the Grid": [
+        ("the secret city", "a route that consciously avoids tourists, chains, and main streets to show you local secrets"),
+        ("the quiet corner", "a slow path built around hidden community gardens, quiet pocket parks, and micro-cafes"),
+        ("the vintage crawl", "a route connecting retro thrift stores, old book nooks, and cozy, off-beat coffee spots"),
+    ],
+    "Feeling Lucky": [
+        ("the serendipity drift", "a completely unpredictable walk where we trust the algorithm to take us somewhere unexpected"),
+        ("the avant-garde stroll", "a theme that blends art, oddities, and unique local history into a strange but perfect afternoon"),
+        ("the curiosity loop", "a path designed to spark your curiosity with places that don't fit into any standard category"),
     ],
 }
 
@@ -192,24 +221,6 @@ class AdvisorResponse(BaseModel):
     weather_advice: Optional[str] = None
 
 
-class PresetOption(BaseModel):
-    title: str
-    vibe: str
-    time_budget: int
-    num_stops: int
-    free_only: bool
-    companion: str
-    reason: str
-
-
-class PresetRequest(BaseModel):
-    start_location: str
-    local_time: Optional[str] = None
-    refresh: bool = False
-
-
-class PresetsResponse(BaseModel):
-    presets: List[PresetOption]
 
 
 class ShareRequest(BaseModel):
@@ -337,6 +348,44 @@ async def _extract_custom_queries(vibe: str) -> List[str]:
     except Exception as e:
         print(f"Error extracting custom queries: {e}")
         return [vibe]
+
+
+async def _extract_lucky_queries() -> List[str]:
+    """Generate a surprising, themed, and avant-garde set of Google Maps search queries for 'Feeling Lucky'."""
+    try:
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an urban exploration planner. The user clicked 'I'm Feeling Lucky'. "
+                            "Create a cohesive but completely unexpected, quirky, and themed set of 3 to 5 Google Maps search queries. "
+                            "Think of strange but delightful themes: a retro neon crawl, a botanical & vintage book drift, "
+                            "a speakeasy & historic mystery walk, or a vinyl record & coffee alleyway stroll. "
+                            "Be creative and specific with the search queries (e.g. 'independent bookstore', 'retro arcade bar', 'historic fountain overlook'). "
+                            "Return ONLY a JSON object containing a 'queries' array of strings. Example: {'queries': ['query1', 'query2', 'query3']}."
+                        )
+                    },
+                    {"role": "user", "content": "Generate a completely unique and surprising walk vibe theme and queries."}
+                ],
+                response_format={"type": "json_object"},
+                temperature=1.0
+            )
+        )
+        content = response.choices[0].message.content
+        if content:
+            data = json.loads(content)
+            queries = data.get("queries")
+            if isinstance(queries, list):
+                return [str(q) for q in queries]
+        return ["speakeasy hidden bar", "vintage curio shop", "secret garden"]
+    except Exception as e:
+        print(f"Error generating lucky queries: {e}")
+        return ["speakeasy hidden bar", "vintage curio shop", "secret garden"]
 
 
 # ── Google Geocoding API ──────────────────────────────────────────────────────
@@ -952,8 +1001,10 @@ async def generate_route(request: RouteRequest):
             yield "data: " + json.dumps({"type": "status", "message": "searching for verified venues..."}) + "\n\n"
             
             # Check for custom vibe and extract queries if needed
-            is_custom = request.vibe not in VIBE_QUERIES
-            if is_custom:
+            if request.vibe == "Feeling Lucky":
+                yield "data: " + json.dumps({"type": "status", "message": "spinning the wheel: generating a surprise theme..."}) + "\n\n"
+                queries = await _extract_lucky_queries()
+            elif request.vibe not in VIBE_QUERIES:
                 yield "data: " + json.dumps({"type": "status", "message": f"interpreting custom vibe: '{request.vibe}'..."}) + "\n\n"
                 queries = await _extract_custom_queries(request.vibe)
             else:
@@ -966,8 +1017,8 @@ async def generate_route(request: RouteRequest):
             time_scale_radius = (request.time_budget_minutes / 30.0) * 500.0
             
             if is_round_trip:
-                # Loop / Round Trip: search radius based solely on time budget, centered on start
-                radius_m = max(1000.0, min(5000.0, time_scale_radius))
+                # Loop / Round Trip: search radius scaled down so walking time doesn't consume the budget
+                radius_m = max(600.0, min(1500.0, time_scale_radius * 0.4))
                 centers = [start_ll]
                 print(f"Round Trip detected. Radius: {radius_m:.0f}m, Center: {start_ll}")
             else:
@@ -1004,8 +1055,10 @@ async def generate_route(request: RouteRequest):
                             
                             # Compute vector progression percentage along the start -> end vector
                             if is_round_trip:
-                                # For a loop route, progression along the line doesn't apply (all points near start)
-                                progression = 0.0
+                                # For a loop route, sort by polar angle around start to form a natural loop
+                                angle = math.atan2(place["lat"] - start_ll["lat"], place["lng"] - start_ll["lng"])
+                                # Map angle from [-pi, pi] to [0.0, 1.0]
+                                progression = (angle + math.pi) / (2.0 * math.pi)
                             else:
                                 v_lat = end_ll["lat"] - start_ll["lat"]
                                 v_lng = end_ll["lng"] - start_ll["lng"]
@@ -1301,98 +1354,4 @@ async def pacing_advisor(request: AdvisorRequest):
         )
 
 
-@app.post("/api/suggest-vibe-preset", response_model=PresetsResponse)
-async def suggest_vibe_preset(request: PresetRequest):
-    start_ll = await geocode_location(request.start_location)
-    if not start_ll:
-        start_ll = {"lat": 40.7580, "lng": -73.9855} # default NYC
-        
-    weather_info = await _get_weather(start_ll["lat"], start_ll["lng"])
-    weather_str = "unknown weather"
-    if weather_info:
-        weather_str = f"{weather_info['main']} ({weather_info['description']}), {weather_info['temp_c']}°C"
-        
-    preset_system_prompt = (
-        "you are a creative walk planner for the 'wander' app. "
-        "your goal is to recommend exactly 3 highly personalized, localized walking presets based on the start location, local time, and weather.\n\n"
-        "guidelines:\n"
-        "1. never use any capital letters (e.g. use 'hell\\'s kitchen stroll', not 'Hell\\'s Kitchen Stroll').\n"
-        "2. never end any sentences with a period. use playful, relaxed punctuation (like commas or exclamation marks if needed).\n"
-        "3. return exactly 3 presets tailored to the conditions:\n"
-        "   - morning: suggest breakfast, bakeries, coffee walks.\n"
-        "   - evening/night: suggest cozy bars, twilight vistas, illuminated lanes.\n"
-        "   - rainy/cold: suggest indoor passages, museums, covered food courts, art halls.\n"
-        "   - companion profiles: assign varied companions ('solo', 'date', 'friends', 'pet') to show options.\n"
-        "4. assign a catch title (title) like 'espresso crawl' or 'quiet garden loop'.\n"
-        "5. assign a vibe string (vibe) which is a list of comma-separated search terms or description (e.g. 'bookstore, small cafe, art gallery').\n"
-        "6. assign a recommended time_budget in minutes (typically 60 to 120).\n"
-        "7. assign a recommended num_stops (between 2 and 5).\n"
-        "8. assign free_only boolean (True or False).\n"
-        "9. assign companion ('solo' | 'date' | 'friends' | 'pet').\n"
-        "10. write a short reason (reason) explaining why this fits the time of day, weather, or location (e.g. 'perfect for a warm date night sunset walk')."
-    )
 
-    loop = asyncio.get_event_loop()
-    temperature = 1.1 if request.refresh else 0.8
-    try:
-        response = await loop.run_in_executor(
-            None,
-            lambda: openai_client.beta.chat.completions.parse(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": preset_system_prompt},
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Start Location: {request.start_location}\n"
-                            f"Local Time: {request.local_time or 'unknown'}\n"
-                            f"Current Weather: {weather_str}"
-                        )
-                    }
-                ],
-                response_format=PresetsResponse,
-                temperature=temperature
-            )
-        )
-        parsed = response.choices[0].message.parsed
-        # Enforce all-lowercase branding and period-free on text fields
-        for p in parsed.presets:
-            p.title = p.title.lower().rstrip(".")
-            p.vibe = p.vibe.lower().rstrip(".")
-            p.reason = p.reason.lower().rstrip(".")
-            
-        return parsed
-    except Exception as e:
-        print(f"Error calling vibe preset LLM: {e}")
-        # fallback
-        return PresetsResponse(
-            presets=[
-                PresetOption(
-                    title="cozy cafe stroll",
-                    vibe="bakery, indie cafe, cozy seating",
-                    time_budget=90,
-                    num_stops=3,
-                    free_only=False,
-                    companion="solo",
-                    reason="perfect for a quiet coffee break in the neighborhood"
-                ),
-                PresetOption(
-                    title="green garden wander",
-                    vibe="public park, green space, botanical garden",
-                    time_budget=60,
-                    num_stops=2,
-                    free_only=True,
-                    companion="pet",
-                    reason="an outdoor loop tailored for fresh air and pets"
-                ),
-                PresetOption(
-                    title="culture & history walk",
-                    vibe="museum, library, historic landmark",
-                    time_budget=120,
-                    num_stops=4,
-                    free_only=False,
-                    companion="friends",
-                    reason="a comprehensive cultural tour with friends"
-                )
-            ]
-        )
