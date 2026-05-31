@@ -819,7 +819,24 @@ async def _enrich_route(
     for i, wp_obj in enumerate(waypoints):
         wp_obj.walk_to_next_mins = walk_times[i + 1] if i + 1 < len(walk_times) else 0
 
+    walking_only_mins = sum(w.walk_to_next_mins for w in waypoints) + initial_walk_mins
     total_time = sum(w.duration_mins + w.walk_to_next_mins for w in waypoints) + initial_walk_mins
+
+    # ── a) Geometry validation ─────────────────────────────────────────────────
+    # If the real Google walking time alone chews >85% of the budget the AI
+    # hallucinated a zigzag route — no time left for stops.  Raise so the caller
+    # can skip this candidate and try another.
+    budget = request.time_budget_minutes
+    walk_ratio = walking_only_mins / budget if budget > 0 else 0
+    if walk_ratio > 0.85:
+        logger.warning(
+            f"Geometry reject: walking={walking_only_mins}m budget={budget}m "
+            f"ratio={walk_ratio:.2f} — route '{raw_route.route_name}' discarded"
+        )
+        raise ValueError(
+            f"Route geometry invalid: {walking_only_mins} min walking in {budget} min budget "
+            f"(ratio {walk_ratio:.2f})"
+        )
 
     return WanderRouteOptionV3(
         route_name=raw_route.route_name.lower().rstrip('.'),
@@ -1071,6 +1088,14 @@ async def generate_route(request: RouteRequest):
                         "type": "route",
                         "index": idx,
                         "route": enriched.model_dump()
+                    }) + "\n\n"
+                except ValueError as geo_err:
+                    # Geometry validation failure — skip this route, log to client
+                    logger.warning(f"Skipping {route_label} due to geometry: {geo_err}")
+                    yield "data: " + json.dumps({
+                        "type": "geometry_skip",
+                        "index": idx,
+                        "reason": str(geo_err)
                     }) + "\n\n"
                 except Exception as e:
                     print(f"Error curating RAG {route_label}: {e}")

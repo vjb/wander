@@ -343,7 +343,7 @@ function InputScreen({
                 className={`flex-1 bg-transparent text-[#f4f4f5] placeholder-[#f4f4f5]/25 font-light tracking-wide focus:outline-none min-w-0 transition-all ${comfortMode ? 'text-[17px]' : 'text-[15px]'}`}
                 style={{ fontFamily: "var(--font-inter)" }}
               />
-              <button 
+              <button
                 onClick={handleLocate}
                 className="p-1.5 shrink-0 rounded-md bg-[#8ba88e]/5 hover:bg-[#8ba88e]/15 text-[#8ba88e] transition-colors"
                 title="Use my current location"
@@ -353,45 +353,47 @@ function InputScreen({
               </button>
             </div>
 
-            {/* Round-trip pill + connector */}
+            {/* Round-trip connector row */}
             <div className="flex items-center gap-3 py-2 px-1">
               <div className="w-px h-8 bg-[#f4f4f5]/8 ml-[8px] shrink-0" />
               <button
                 type="button"
                 id="round-trip-toggle"
                 onClick={() => setIsRoundTrip(!isRoundTrip)}
-                className={`flex items-center gap-2 px-4 py-1.5 rounded-full border text-[12px] font-medium tracking-wide transition-all duration-250 ${
+                className={`flex items-center gap-2 px-4 py-1.5 rounded-full border text-[12px] font-medium tracking-wide transition-all duration-200 ${
                   isRoundTrip
                     ? "bg-[#8ba88e]/18 border-[#8ba88e]/50 text-[#8ba88e] shadow-[0_0_14px_rgba(139,168,142,0.12)]"
                     : "bg-transparent border-[#f4f4f5]/12 text-[#f4f4f5]/35 hover:text-[#f4f4f5]/55 hover:border-[#f4f4f5]/25"
                 }`}
                 style={{ fontFamily: "var(--font-inter)" }}
               >
-                <span>{isRoundTrip ? "↩" : "↩"}</span>
+                <span>↩</span>
                 {isRoundTrip ? "looping back to start" : "make it a loop"}
               </button>
             </div>
 
-            <div className="flex items-center gap-3.5 py-4 px-1 border-b border-transparent focus-within:border-[#e5d3b3]/40 transition-colors duration-300">
-              <MapPin className={`${comfortMode ? 'w-5 h-5' : 'w-4 h-4'} ${isRoundTrip ? 'text-[#8ba88e]/60' : 'text-[#e5d3b3]'} shrink-0 transition-all`} strokeWidth={1.5} />
-              <input
-                id="end-location"
-                type="text"
-                placeholder={isRoundTrip ? "back to start" : "Ending up at…"}
-                value={isRoundTrip ? start : end}
-                onChange={(e) => { if (!isRoundTrip) setEnd(e.target.value); }}
-                readOnly={isRoundTrip}
-                className={`flex-1 bg-transparent placeholder-[#f4f4f5]/25 font-light tracking-wide focus:outline-none transition-all ${
-                  comfortMode ? 'text-[17px]' : 'text-[15px]'
-                } ${
-                  isRoundTrip ? 'text-[#f4f4f5]/35 cursor-default' : 'text-[#f4f4f5]'
-                }`}
-                style={{ fontFamily: "var(--font-inter)" }}
-              />
-              {isRoundTrip && (
-                <Lock className="w-3.5 h-3.5 text-[#8ba88e]/40 shrink-0" strokeWidth={1.5} />
-              )}
-            </div>
+            {/* d) End field: collapse entirely when round-trip is on */}
+            {isRoundTrip ? (
+              <div className="flex items-center gap-3.5 py-3 px-1">
+                <MapPin className={`${comfortMode ? 'w-5 h-5' : 'w-4 h-4'} text-[#8ba88e]/40 shrink-0`} strokeWidth={1.5} />
+                <span className={`${comfortMode ? 'text-[15px]' : 'text-[13px]'} text-[#8ba88e]/50 font-light italic`} style={{ fontFamily: "var(--font-inter)" }}>
+                  ends back at {start || "your starting point"}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3.5 py-4 px-1 border-b border-transparent focus-within:border-[#e5d3b3]/40 transition-colors duration-300">
+                <MapPin className={`${comfortMode ? 'w-5 h-5' : 'w-4 h-4'} text-[#e5d3b3] shrink-0 transition-all`} strokeWidth={1.5} />
+                <input
+                  id="end-location"
+                  type="text"
+                  placeholder="Ending up at…"
+                  value={end}
+                  onChange={(e) => setEnd(e.target.value)}
+                  className={`flex-1 bg-transparent text-[#f4f4f5] placeholder-[#f4f4f5]/25 font-light tracking-wide focus:outline-none transition-all ${comfortMode ? 'text-[17px]' : 'text-[15px]'}`}
+                  style={{ fontFamily: "var(--font-inter)" }}
+                />
+              </div>
+            )}
           </div>
 
           {/* Presets Carousel — hidden when advisor has already flagged impossible */}
@@ -524,9 +526,19 @@ function InputScreen({
             <p className="text-[#f4f4f5]/40 text-[12px] font-medium tracking-widest uppercase mb-4" style={{ fontFamily: "var(--font-inter)" }}>
               your vibe
             </p>
+            {/* e) Show badge when custom vibe overrides presets */}
+            {customVibe.trim() && (
+              <div className="flex items-center gap-2 mb-3">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#8ba88e]/12 border border-[#8ba88e]/30 text-[#8ba88e] text-[11px] font-medium" style={{ fontFamily: "var(--font-inter)" }}>
+                  ✦ using your custom vibe
+                </span>
+                <button onClick={() => setCustomVibe("")} className="text-[#f4f4f5]/30 hover:text-[#f4f4f5]/60 text-[11px] transition-colors" style={{ fontFamily: "var(--font-inter)" }}>clear</button>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-2.5 mb-4">
               {VIBES.map((v) => {
                 const isSelected = vibe === v.id;
+                const dimmed = customVibe.trim().length > 0;
                 return (
                   <motion.button
                     key={v.id}
@@ -535,12 +547,14 @@ function InputScreen({
                       setVibe(v.id);
                       setCustomVibe("");
                     }}
-                    whileHover={{ scale: 1.025 }}
+                    whileHover={{ scale: dimmed ? 1 : 1.025 }}
                     whileTap={{ scale: 0.975 }}
                     transition={{ type: "spring", stiffness: 400, damping: 25 }}
                     className={`relative p-3.5 rounded-2xl border text-left transition-all duration-300 ${
                       isSelected
                         ? `${v.activeBg} ${v.activeBorder} ${v.activeGlow}`
+                        : dimmed
+                        ? "bg-[#f4f4f5]/1 border-[#f4f4f5]/4 opacity-35"
                         : "bg-[#f4f4f5]/3 border-[#f4f4f5]/6 hover:bg-[#f4f4f5]/5 hover:border-[#f4f4f5]/10"
                     }`}
                   >
@@ -733,7 +747,16 @@ function InputScreen({
             </div>
           )}
 
-          {/* CTA */}
+          {/* f) Static hint above CTA when disabled */}
+          {!canWander && (
+            <p className="text-center text-[11px] text-[#f4f4f5]/30 mb-3" style={{ fontFamily: "var(--font-inter)" }}>
+              {!start.trim() || !effectiveEnd.trim()
+                ? "↑ add a start & end location"
+                : "↑ pick a vibe to continue"}
+            </p>
+          )}
+
+          {/* CTA — always reads 'plan my wander' */}
           <motion.button
             id="wander-button"
             onClick={onWander}
@@ -748,20 +771,8 @@ function InputScreen({
             }`}
             style={{ fontFamily: "var(--font-inter)" }}
           >
-            {canWander ? (
-              <>
-                <span>
-                  {start.trim() === end.trim() && start.trim() !== ""
-                    ? "generate three round-trip loops"
-                    : "generate three routes"}
-                </span>
-                <ArrowRight className="w-4 h-4" strokeWidth={2} />
-              </>
-            ) : start.trim() && end.trim() ? (
-              "choose a vibe above"
-            ) : (
-              "add your start & end above"
-            )}
+            <span>{isRoundTrip && canWander ? "plan my loop" : "plan my wander"}</span>
+            {canWander && <ArrowRight className="w-4 h-4" strokeWidth={2} />}
           </motion.button>
 
           <AnimatePresence>
@@ -1500,33 +1511,43 @@ export function RouteScreen({
             transition={{ delay: 0.15, duration: 0.5 }}
             className="relative flex gap-2 mb-3 p-1 rounded-2xl bg-[#f4f4f5]/3 border border-[#f4f4f5]/6"
           >
+            {/* c) Tabs with stronger active/inactive affordance */}
             {[0, 1, 2].map((i) => {
               const route = data.routes[i];
-              const tabTitle = route ? route.route_name : `route ${i + 1} (generating...)`;
+              const isLoading = !route;
+              const tabTitle = route ? route.route_name : `route ${i + 1}…`;
               const isSelected = selectedIndex === i;
               return (
                 <button
                   key={i}
                   id={`route-tab-${i}`}
-                  onClick={() => setSelectedIndex(i)}
-                  className="relative flex-1 px-2 py-2.5 rounded-xl text-center transition-colors duration-200 z-10"
+                  onClick={() => { if (route) setSelectedIndex(i); }}
+                  disabled={isLoading}
+                  className={`relative flex-1 px-2 py-3 rounded-xl text-center transition-all duration-200 z-10 ${
+                    isLoading ? "opacity-40 cursor-wait" : "cursor-pointer"
+                  }`}
                 >
                   {isSelected && (
                     <motion.div
                       layoutId="active-route-tab"
-                      className="absolute inset-0 bg-[#8ba88e]/15 border border-[#8ba88e]/30 rounded-xl"
+                      className="absolute inset-0 bg-[#8ba88e]/18 border border-[#8ba88e]/40 rounded-xl shadow-[0_0_12px_rgba(139,168,142,0.12)]"
                       transition={{ type: "spring", stiffness: 400, damping: 30 }}
                     />
                   )}
                   <span
-                    className={`relative z-10 text-[11px] font-semibold leading-tight block tracking-wide transition-colors truncate max-w-full ${
-                      selectedIndex === i ? "text-[#8ba88e]" : "text-[#f4f4f5]/35 hover:text-[#f4f4f5]/65"
+                    className={`relative z-10 text-[11px] font-semibold leading-snug block tracking-wide transition-colors ${
+                      isSelected
+                        ? "text-[#8ba88e]"
+                        : "text-[#f4f4f5]/45 hover:text-[#f4f4f5]/75"
                     }`}
                     style={{ fontFamily: "var(--font-inter)" }}
                     title={tabTitle}
                   >
                     {tabTitle}
                   </span>
+                  {isSelected && (
+                    <span className="relative z-10 block w-3 h-0.5 bg-[#8ba88e]/60 rounded-full mx-auto mt-1.5" />
+                  )}
                 </button>
               );
             })}
@@ -1723,13 +1744,13 @@ export function RouteScreen({
           )}
         </AnimatePresence>
 
-        {/* ── Map Preview ── */}
+        {/* b) Map FIRST — above the stop timeline so users see geography immediately */}
         {!isGenerating && activeRoute && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
+            initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.3, duration: 0.5 }}
-            className="mb-6 w-full h-[360px] rounded-2xl overflow-hidden border border-[#8ba88e]/15 shadow-[0_0_40px_rgba(139,168,142,0.08)] relative bg-[#131316]"
+            transition={{ delay: 0.25, duration: 0.45 }}
+            className="mb-5 w-full h-[340px] rounded-2xl overflow-hidden border border-[#8ba88e]/15 shadow-[0_0_40px_rgba(139,168,142,0.08)] relative bg-[#131316]"
           >
             <WanderMap route={activeRoute} />
           </motion.div>
