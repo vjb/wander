@@ -1,6 +1,6 @@
-"""
+r"""
 Test all three enabled Google Maps API endpoints.
-Run with: wander-api\venv\Scripts\python test_google_apis.py
+Run with: wander-api\venv\Scripts\python tests/test_google_apis.py
 """
 import urllib.request
 import urllib.parse
@@ -8,7 +8,9 @@ import json
 import os
 from dotenv import load_dotenv
 
-load_dotenv("wander-api/.env")
+# Resolve .env path relative to this script's directory
+env_path = os.path.join(os.path.dirname(__file__), "..", "wander-api", ".env")
+load_dotenv(env_path)
 KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 
 PASS = "\033[92m✅ PASS\033[0m"

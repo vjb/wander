@@ -1,8 +1,8 @@
-"""
+r"""
 Wander V3 — Scripted Backend Test
 Verifies: OpenAI structured output, Google RAG pipeline, deep links, google_rating on every stop.
 
-Run: wander-api\venv\Scripts\python test_v3.py
+Run: wander-api\venv\Scripts\python tests/test_v3.py
      (make sure uvicorn is running on port 8000 first)
 """
 import urllib.request

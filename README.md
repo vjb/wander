@@ -291,10 +291,10 @@ Visit **http://localhost:3000**. The Next.js dev server proxies `/api/*` to Fast
 
 ```bash
 # Verify integrity of Google API credentials
-wander-api\venv\Scripts\python test_google_apis.py
+wander-api\venv\Scripts\python tests/test_google_apis.py
 
 # Full backend integration and retrieval-augmented generation test suite
-wander-api\venv\Scripts\python test_v3.py
+wander-api\venv\Scripts\python tests/test_v3.py
 ```
 
 Asserts:
@@ -310,30 +310,33 @@ Asserts:
 
 ```
 wander/
-230: ├── wander-api/
-231: │   ├── main.py               # Route generation pipeline, constraints, SSE streaming
-232: │   ├── database.py           # SQLite persistence for shared routes
-233: │   ├── requirements.txt
-234: │   └── .env                  # API keys (never committed)
-235: │
-236: ├── wander-ui/
-237: │   ├── app/
-238: │   │   ├── components/
-239: │   │   │   └── MapPreview.tsx      # Google Maps embed with route polyline
-240: │   │   ├── hooks/
-241: │   │   │   ├── useWalkMode.ts      # Live GPS walk mode, proximity detection
-242: │   │   │   └── usePassport.ts      # Neighborhood passport (localStorage)
-243: │   │   ├── r/[id]/page.tsx         # Shareable route renderer
-244: │   │   ├── globals.css             # Design tokens, animation utilities
-245: │   │   ├── layout.tsx              # Inter + Playfair Display fonts
-246: │   │   └── page.tsx                # Main app: inputs, routes, timeline, calendar
-247: │   ├── public/
-248: │   │   ├── manifest.json           # PWA manifest
-249: │   │   └── sw.js                   # Service worker cache
-250: │   └── next.config.ts              # /api/* proxy → localhost:8000
-251: │
-252: ├── assets/                         # App screenshots
-253: └── README.md
+├── wander-api/
+│   ├── main.py               # Route generation pipeline, constraints, SSE streaming
+│   ├── database.py           # SQLite persistence for shared routes
+│   ├── requirements.txt
+│   └── .env                  # API keys (never committed)
+│
+├── wander-ui/
+│   ├── app/
+│   │   ├── components/
+│   │   │   └── MapPreview.tsx      # Google Maps embed with route polyline
+│   │   ├── hooks/
+│   │   │   ├── useWalkMode.ts      # Live GPS walk mode, proximity detection
+│   │   │   └── usePassport.ts      # Neighborhood passport (localStorage)
+│   │   ├── r/[id]/page.tsx         # Shareable route renderer
+│   │   ├── globals.css             # Design tokens, animation utilities
+│   │   ├── layout.tsx              # Inter + Playfair Display fonts
+│   │   └── page.tsx                # Main app: inputs, routes, timeline, calendar
+│   ├── public/
+│   │   ├── manifest.json           # PWA manifest
+│   │   └── sw.js                   # Service worker cache
+│   └── next.config.ts              # /api/* proxy → localhost:8000
+│
+├── assets/                         # App screenshots
+├── tests/                          # Integration and Google API testing suite
+│   ├── test_google_apis.py
+│   └── test_v3.py
+└── README.md
 ```
 
 ---
