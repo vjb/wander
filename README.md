@@ -79,31 +79,16 @@ wander accepts a starting location, an ending location, a time budget, and a des
 
 wander enforces a strict, multi-stage pipeline to generate walking tours:
 
-```
-User Request (start, end, time_budget, vibe, local_time)
-    │
-    ├─ 1. Geocode Start & End coordinates (Geocoding API)
-    │
-    ├─ 2. Fetch current weather conditions (OpenWeatherMap API)
-    │
-    ├─ 3. Keyword Extraction (GPT-4o-mini)
-    │      Extracts Maps search queries from the user's custom vibe text.
-    │
-    ├─ 4. Corridor Radar Sweep (Places API New)
-    │      5 parallel searches centered along the route path →
-    │      15-20 verified venue candidates.
-    │
-    ├─ 5. Sequential Route Generation (GPT-4o)
-    │      Streams 3 distinct themed routes via SSE.
-    │      Venues used in Route 1 are excluded from Routes 2 & 3.
-    │
-    ├─ 6. Walking Validation (Directions API)
-    │      Validates real road-network walking time between every stop.
-    │
-    ├─ 7. Persistence (SQLite3)
-    │      Stores route data for permanent shareable links.
-    │
-    └─ Response streamed → Timeline, Ratings, Map Polyline, Deep Link, ICS
+```mermaid
+graph TD
+    A["User Request (start, end, time_budget, vibe, local_time)"] --> B["1. Geocode Locations (Google Geocoding API)"]
+    B --> C["2. Fetch Weather (OpenWeatherMap API)"]
+    C --> D["3. Extract Keywords (GPT-4o-mini vibe queries)"]
+    D --> E["4. Corridor Radar Sweep (Google Places API New)"]
+    E --> F["5. Route Generation (GPT-4o RAG Curation)"]
+    F --> G["6. Walking Legs Validation (Google Directions API)"]
+    G --> H["7. Persistence (SQLite3 shareable route storage)"]
+    H --> I["SSE Response Stream (Itinerary details, maps links, calendar ICS)"]
 ```
 
 ---
