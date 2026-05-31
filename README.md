@@ -20,10 +20,9 @@ wander accepts starting and destination parameters to dynamically structure walk
 
 <br/>
 
-**2. Stream and compare three routes**: The application queries the Google Directions API to fetch the baseline direct path, decodes the polyline, dynamically samples 2-5 intermediate center coordinates based on the route distance (1 point per 800m), and runs tight parallel Google Places sweeps (400m radius restriction). The engine then streams three distinct themed walking itineraries:
-* **Route 1 (Scenic and Relaxed)**: Prioritizes parks, waterfront paths, and low-traffic streets.
-* **Route 2 (Culturally Dense)**: Integrates bookstores, art galleries, and historic landmarks.
-* **Route 3 (Social and Lively)**: Incorporates cafes, food halls, local vendors, and bars.
+**2. Stream and compare three routes**: The application queries the Google Directions API to fetch the baseline direct path, decodes the polyline, dynamically samples 2-5 intermediate center coordinates based on the route distance (1 point per 800m), and runs tight parallel Google Places sweeps (400m radius restriction). The engine then streams three distinct themed walking itineraries custom-tailored to your selected vibe:
+* **Preset Vibes**: Generates three distinct sub-themes for that vibe (e.g. for *Caffeinated & Cultured*, it curates *the morning ritual*, *the gallery drift*, and *the literary afternoon*).
+* **Custom Vibes**: Generates three thematic variants to match your text profile (*the discovery route*, *the local's pick*, and *the mood route*).
 
 <div align="center">
   <img src="assets/crop-04-route.png" width="660" alt="Route dashboard showing walk and dwell time metrics" />
