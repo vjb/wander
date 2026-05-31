@@ -36,6 +36,8 @@ import {
 } from "lucide-react";
 
 import { WanderMap } from "./components/WanderMap";
+import { TurnByTurnRibbon } from "./components/TurnByTurnRibbon";
+import { ElevationChart } from "./components/ElevationChart";
 import { RotatingTagline } from "./components/RotatingTagline";
 import WanderCompleteOverlay from "./components/WanderCompleteOverlay";
 import { useWalkMode } from "./hooks/useWalkMode";
@@ -82,6 +84,13 @@ interface WanderRouteOptionV3 {
   navigation_deep_link: string;
   estimated_total_cost_usd?: number;
   route_polyline?: number[][] | null;
+  route_steps?: {
+    instruction: string;
+    distance_m: number;
+    duration_secs: number;
+    maneuver: string;
+  }[] | null;
+  elevation_profile?: { elevation: number; index: number }[] | null;
 }
 
 interface WanderV3Response {
@@ -2411,7 +2420,37 @@ export function RouteScreen({
             transition={{ delay: 0.25, duration: 0.45 }}
             className="mb-5 w-full h-[340px] rounded-2xl overflow-hidden border border-[#8ba88e]/15 shadow-[0_0_40px_rgba(139,168,142,0.08)] relative bg-[#131316]"
           >
-            <WanderMap route={activeRoute} />
+          <WanderMap route={activeRoute} />
+          </motion.div>
+        )}
+
+        {/* Turn-by-Turn Ribbon */}
+        {!isGenerating && activeRoute?.route_steps && activeRoute.route_steps.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.35, duration: 0.4 }}
+            className="mb-3 glass-lighter rounded-2xl overflow-hidden"
+          >
+            <TurnByTurnRibbon steps={activeRoute.route_steps} />
+          </motion.div>
+        )}
+
+        {/* Elevation Chart */}
+        {!isGenerating && activeRoute?.elevation_profile && activeRoute.elevation_profile.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.45, duration: 0.4 }}
+            className="mb-5 glass-lighter rounded-2xl overflow-hidden"
+          >
+            <ElevationChart
+              data={activeRoute.elevation_profile}
+              waypointFractions={activeRoute.waypoints
+                .filter(wp => wp.lat != null && wp.lng != null)
+                .map((_, i, arr) => (i + 1) / (arr.length + 1))
+              }
+            />
           </motion.div>
         )}
 

@@ -1,9 +1,29 @@
-fix: swap panel overflow-hidden clip + OTM wiki contaminating insider tips
+feat: map overhaul — animated polyline, pulse zones, Street View popup, turn-by-turn ribbon, elevation chart
 
-- Frontend: removed overflow-hidden from WaypointCard outer wrapper so the swap
-  panel animates open correctly within the card bounds. Photo banner retains its
-  own overflow-hidden for the image crop.
-- Backend: removed OTM Wikipedia extract append from insider_tip in all 3
-  enrichment blocks (enrich_route, swap_waypoint, vibe_detour). OTM wiki often
-  returns non-English text (Cebuano, etc.) which pollutes the LLM-written tip.
-  Wikipedia extract is still fetched but only used for photo/address enrichment.
+Frontend (WanderMap.tsx):
+- Replaced CARTO dark tiles with Stadia Alidade Smooth Dark (more minimal/premium)
+- 3-segment gradient animated polyline: matcha green -> sage -> amber with CSS flow animation
+- Glow halo layer behind the route line with slow pulse animation
+- 100m pulse zone circles on each stop (matches walk mode auto-check-in radius)
+- Amber pulse zone on destination marker
+- Pulsing destination (D) marker animation
+- Street View Static thumbnail in stop popups via server-side proxy
+- User location blue dot marker support (userLat/userLng prop)
+
+New components:
+- TurnByTurnRibbon.tsx: horizontally scrollable walking directions cards with
+  maneuver icons (turn-left/right/straight/etc), distance, and duration per step
+- ElevationChart.tsx: pure SVG elevation profile with gradient fill, gain/loss
+  stats, and numbered waypoint tick marks. Skips rendering if range < 5m.
+
+New API route:
+- /api/streetview: server-side proxy for Google Street View Static API
+  keeps API key hidden, returns image bytes with 24h cache headers
+
+Backend (main.py):
+- get_route_legs_info() now extracts turn-by-turn steps from each Directions leg
+  (html_instructions stripped of HTML tags, maneuver, distance_m, duration_secs)
+- Added _fetch_elevation_profile() — samples 60 points along route polyline
+  via Google Elevation API, fires concurrently with slope-check enrichment
+- WanderRouteOptionV3 gains: route_steps and elevation_profile fields
+- All 3 fields populated in _enrich_route() return value

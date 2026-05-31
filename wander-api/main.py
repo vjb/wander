@@ -215,6 +215,8 @@ class WanderRouteOptionV3(BaseModel):
     navigation_deep_link: str
     estimated_total_cost_usd: Optional[int] = 0
     route_polyline: Optional[List[List[float]]] = Field(None, description="Decoded lat/lng pairs for the full walking route path")
+    route_steps: Optional[List[Dict]] = Field(None, description="Turn-by-turn walking steps from Directions API")
+    elevation_profile: Optional[List[Dict]] = Field(None, description="Elevation samples along the route polyline")
 
 
 
@@ -830,21 +832,36 @@ async def get_route_legs_info(addresses: List[str]) -> List[Dict]:
                 secs = leg["duration"]["value"]
                 dist = leg["distance"]["value"]
                 poly = route.get("overview_polyline", {}).get("points", "")
+                # Extract turn-by-turn steps, stripping HTML tags
+                steps = []
+                for step in leg.get("steps", []):
+                    raw_instr = step.get("html_instructions", "")
+                    clean_instr = re.sub(r"<[^>]+>", " ", raw_instr).strip()
+                    clean_instr = re.sub(r"\s+", " ", clean_instr)
+                    steps.append({
+                        "instruction": clean_instr,
+                        "distance_m": step.get("distance", {}).get("value", 0),
+                        "duration_secs": step.get("duration", {}).get("value", 0),
+                        "maneuver": step.get("maneuver", ""),
+                    })
                 return {
                     "duration_mins": round(secs / 60),
                     "distance_m": dist,
-                    "polyline": poly
+                    "polyline": poly,
+                    "steps": steps,
                 }
             return {
                 "duration_mins": 8,
                 "distance_m": 600,
-                "polyline": ""
+                "polyline": "",
+                "steps": [],
             }
         except Exception:
             return {
                 "duration_mins": 8,
                 "distance_m": 600,
-                "polyline": ""
+                "polyline": "",
+                "steps": [],
             }
 
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -862,9 +879,37 @@ async def get_route_legs_info(addresses: List[str]) -> List[Dict]:
             legs.append({
                 "duration_mins": 8,
                 "distance_m": 600,
-                "polyline": ""
+                "polyline": "",
+                "steps": [],
             })
     return legs
+
+
+async def _fetch_elevation_profile(
+    polyline_points: List[List[float]], samples: int = 50
+) -> List[Dict]:
+    """Sample elevation along route using Google Elevation API. Returns list of {elevation, index}."""
+    if not polyline_points or len(polyline_points) < 4 or not GOOGLE_KEY:
+        return []
+    total = len(polyline_points)
+    indices = [int(i * total / min(samples, total)) for i in range(min(samples, total))]
+    sampled = [polyline_points[i] for i in indices]
+    locations = "|".join(f"{lat},{lng}" for lat, lng in sampled)
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            res = await client.get(
+                "https://maps.googleapis.com/maps/api/elevation/json",
+                params={"locations": locations, "key": GOOGLE_KEY},
+            )
+            data = res.json()
+            if data.get("status") == "OK":
+                return [
+                    {"elevation": round(r["elevation"], 1), "index": i}
+                    for i, r in enumerate(data["results"])
+                ]
+    except Exception as e:
+        logger.warning(f"Elevation API failed (non-critical): {e}")
+    return []
 
 
 async def get_walking_times(addresses: List[str]) -> List[int]:
@@ -1302,15 +1347,22 @@ async def _enrich_route(
 
     # Decode and concatenate all leg polylines for the full route path
     all_polyline_points: List[List[float]] = []
+    all_route_steps: List[Dict] = []
     try:
         for leg in legs_info:
             encoded = leg.get("polyline", "")
             if encoded:
                 decoded = polyline.decode(encoded)  # returns list of (lat, lng) tuples
                 all_polyline_points.extend([list(pt) for pt in decoded])
+            all_route_steps.extend(leg.get("steps", []))
     except Exception as poly_err:
         logger.warning(f"Polyline decode failed (non-critical): {poly_err}")
         all_polyline_points = []
+
+    # Fetch elevation profile concurrently (non-blocking — fire and forget into gather)
+    elevation_task = asyncio.create_task(
+        _fetch_elevation_profile(all_polyline_points, samples=60)
+    )
 
     # If avoid_slopes is requested, check the elevation profile of all legs in parallel
     if request.avoid_slopes:
@@ -1347,6 +1399,9 @@ async def _enrich_route(
 
     estimated_total_cost_usd = sum(w.estimated_cost_usd or 0 for w in waypoints)
 
+    # Await elevation (started concurrently above; should already be done by now)
+    elevation_profile = await elevation_task
+
     return WanderRouteOptionV3(
         route_name=raw_route.route_name.strip().rstrip('.'),
         theme_summary=raw_route.theme_summary.strip().rstrip('.'),
@@ -1367,6 +1422,8 @@ async def _enrich_route(
         ),
         estimated_total_cost_usd=estimated_total_cost_usd,
         route_polyline=all_polyline_points if all_polyline_points else None,
+        route_steps=all_route_steps if all_route_steps else None,
+        elevation_profile=elevation_profile if elevation_profile else None,
     )
 
 
