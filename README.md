@@ -40,19 +40,19 @@ Routes stream via SSE the moment each one finishes. The first tab auto-selects a
 
 Each route gets its own vibe-specific archetype name, with metadata badges for walk time, stop time, estimated spend, step count, calories, and live weather.
 
-![Three route tabs with metadata badges showing walk time, stops, spend, steps, and weather](./wander-ui/public/screenshots/06_routes.png)
+![Three route tabs with metadata badges showing walk time, stops, spend, steps, and weather](./docs/screenshots/route_screen.png)
 
 ### Real Walking-Route Map
 
 A CARTO dark-mode Leaflet map now draws the **actual street-following route polyline** from Google Directions — no more dashed straight lines. Stop markers are numbered, destination pulses. Tap any marker for a popup with directions, Street View, and the stop summary.
 
-![CARTO dark map with numbered stop markers connected by a real walking-path polyline](./wander-ui/public/screenshots/08_map.png)
+![CARTO dark map with numbered stop markers connected by a real walking-path polyline](./docs/screenshots/route_screen.png)
 
 ### Waypoint Cards with Thumbs Rating
 
 Every stop has a Google Places photo, star rating, vibe-category pill, description, time estimate, cost, street view link, and a permanently visible **Insider Tip**. You can also rate any stop thumbs up/down right on the card — or swap it for something better.
 
-![Waypoint card showing photo, rating, description, thumbs up/down rating buttons, and swap stop button](./wander-ui/public/screenshots/07_waypoint.png)
+![Waypoint card showing photo, rating, description, thumbs up/down rating buttons, and swap stop button](./docs/screenshots/waypoint_card.png)
 
 ### Wander History
 
@@ -64,7 +64,7 @@ Hit the **history** button in the header to see your last 10 wanders — route n
 
 Mid-walk, tap the **detour me** button. The AI surfaces a nearby off-route gem with its own insider tip. Choose to keep walking or **pivot route** — which rebuilds the remaining itinerary around the detour stop.
 
-![Spontaneous Detour modal showing a nearby hidden gem with insider tip and KEEP WALKING / PIVOT ROUTE CTAs](./wander-ui/public/screenshots/09_detour.png)
+![Spontaneous Detour section at the bottom of the route screen with a Detour Me button](./docs/screenshots/vibe_detour.png)
 
 ---
 
