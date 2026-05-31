@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { motion, AnimatePresence, type Variants } from "framer-motion";
 import {
   MapPin,
@@ -27,6 +27,8 @@ import {
   X,
   Trash2,
   Lock,
+  Wand2,
+  ChevronDown,
 } from "lucide-react";
 
 import { WanderMap } from "./components/WanderMap";
@@ -37,7 +39,7 @@ import { usePassport, type PassportEntry } from "./hooks/usePassport";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Screen = "input" | "loading" | "route";
-type VibeId = "Caffeinated & Cultured" | "Green & Scenic" | "Spontaneous & Social" | "Mental Break";
+type VibeId = "Caffeinated & Cultured" | "Green & Scenic" | "Spontaneous & Social" | "Mental Break" | "Off the Grid" | "Feeling Lucky";
 
 export type { PassportEntry };
 
@@ -55,6 +57,7 @@ interface WaypointV3 {
   place_id?: string | null;
   lat?: number | null;
   lng?: number | null;
+  estimated_cost_usd?: number;
 }
 
 interface WanderRouteOptionV3 {
@@ -70,6 +73,7 @@ interface WanderRouteOptionV3 {
   end_lng?: number | null;
   waypoints: WaypointV3[];
   navigation_deep_link: string;
+  estimated_total_cost_usd?: number;
 }
 
 interface WanderV3Response {
@@ -85,16 +89,6 @@ interface AdvisorResponse {
   feasibility_status: "optimal" | "tight" | "impossible";
   density_badge_message: string;
   weather_advice: string | null;
-}
-
-interface PresetOption {
-  title: string;
-  vibe: string;
-  time_budget: number;
-  num_stops: number;
-  free_only: boolean;
-  companion: string;
-  reason: string;
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -149,6 +143,26 @@ const VIBES: {
     activeGlow: "shadow-[0_0_24px_rgba(125,211,252,0.18)]",
     activeText: "text-sky-300",
   },
+  {
+    id: "Off the Grid",
+    emoji: "🗺️",
+    label: "Off the Grid",
+    sub: "Secret garden · Indie bookshops · Hidden gems",
+    activeBorder: "border-emerald-500/40",
+    activeBg: "bg-emerald-500/8",
+    activeGlow: "shadow-[0_0_24px_rgba(16,185,129,0.18)]",
+    activeText: "text-emerald-300",
+  },
+  {
+    id: "Feeling Lucky",
+    emoji: "🎲",
+    label: "Feeling Lucky",
+    sub: "Surprise theme · Unexpected routes · Oddities",
+    activeBorder: "border-rose-400/40",
+    activeBg: "bg-rose-400/8",
+    activeGlow: "shadow-[0_0_24px_rgba(251,113,133,0.18)]",
+    activeText: "text-rose-300",
+  },
 ];
 
 const LOADING_MESSAGES = [
@@ -178,6 +192,105 @@ const cardVariants: Variants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.25, 0.1, 0.25, 1] } },
 };
 
+// ── Confetti Particle System ──────────────────────────────────────────────────
+
+function ConfettiCanvas({ active }: { active: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    if (!active || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let animationFrameId: number;
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const colors = ["#8ba88e", "#e5d3b3", "#d6dfd0", "#c2b280", "#e5e7eb"];
+    interface Particle {
+      x: number;
+      y: number;
+      size: number;
+      color: string;
+      speedX: number;
+      speedY: number;
+      rotation: number;
+      rotationSpeed: number;
+    }
+
+    const particles: Particle[] = [];
+    const particleCount = 120;
+
+    for (let i = 0; i < particleCount; i++) {
+      const fromLeft = Math.random() > 0.5;
+      particles.push({
+        x: fromLeft ? 0 : canvas.width,
+        y: canvas.height * 0.8,
+        size: Math.random() * 8 + 4,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        speedX: (fromLeft ? 1 : -1) * (Math.random() * 15 + 5),
+        speedY: -(Math.random() * 20 + 10),
+        rotation: Math.random() * 360,
+        rotationSpeed: Math.random() * 10 - 5
+      });
+    }
+
+    let frames = 0;
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      let alive = false;
+
+      particles.forEach((p) => {
+        p.x += p.speedX;
+        p.y += p.speedY;
+        p.speedY += 0.4;
+        p.speedX *= 0.98;
+        p.rotation += p.rotationSpeed;
+
+        if (p.y < canvas.height && p.x > -50 && p.x < canvas.width + 50) {
+          alive = true;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate((p.rotation * Math.PI) / 180);
+          ctx.fillStyle = p.color;
+          ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+          ctx.restore();
+        }
+      });
+
+      frames++;
+      if (alive && frames < 180) {
+        animationFrameId = requestAnimationFrame(animate);
+      } else {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    };
+
+    animate();
+
+    const handleResize = () => {
+      if (canvasRef.current) {
+        canvasRef.current.width = window.innerWidth;
+        canvasRef.current.height = window.innerHeight;
+      }
+    };
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [active]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="fixed inset-0 w-full h-full pointer-events-none z-50"
+    />
+  );
+}
+
 // ── Background ────────────────────────────────────────────────────────────────
 
 function BackgroundOrbs() {
@@ -202,6 +315,8 @@ function BackgroundOrbs() {
 function InputScreen({
   start, setStart, end, setEnd,
   timeBudget, setTimeBudget,
+  inputMode, setInputMode,
+  stepGoal, setStepGoal,
   vibe, setVibe,
   onWander, error,
   handleLocate, isLocating,
@@ -209,10 +324,9 @@ function InputScreen({
   deferredPrompt,
   numStops, setNumStops,
   freeOnly, setFreeOnly,
+  avoidSlopes, setAvoidSlopes,
+  maxBudget, setMaxBudget,
   advisorData, advisorLoading, clientFeasibility,
-  presets, presetsLoading,
-  presetsRefreshing, onRefreshPresets,
-  selectedPresetIdx, setSelectedPresetIdx,
   companion, setCompanion,
   setHasManuallySetStops,
   passportCount,
@@ -223,6 +337,8 @@ function InputScreen({
   start: string; setStart: (v: string) => void;
   end: string; setEnd: (v: string) => void;
   timeBudget: number; setTimeBudget: (v: number) => void;
+  inputMode: "time" | "steps"; setInputMode: (v: "time" | "steps") => void;
+  stepGoal: number; setStepGoal: (v: number) => void;
   vibe: VibeId | ""; setVibe: (v: VibeId | "") => void;
   onWander: () => void;
   error: string | null;
@@ -232,15 +348,11 @@ function InputScreen({
   deferredPrompt: any;
   numStops: number; setNumStops: (v: number) => void;
   freeOnly: boolean; setFreeOnly: (v: boolean) => void;
+  avoidSlopes: boolean; setAvoidSlopes: (v: boolean) => void;
+  maxBudget: number; setMaxBudget: (v: number) => void;
   advisorData: AdvisorResponse | null;
   advisorLoading: boolean;
   clientFeasibility: { status: "impossible" | "tight"; message: string } | null;
-  presets: PresetOption[];
-  presetsLoading: boolean;
-  presetsRefreshing: boolean;
-  onRefreshPresets: () => void;
-  selectedPresetIdx: number | null;
-  setSelectedPresetIdx: (v: number | null) => void;
   companion: string;
   setCompanion: (v: string) => void;
   setHasManuallySetStops: (v: boolean) => void;
@@ -253,6 +365,24 @@ function InputScreen({
 }) {
   const effectiveEnd = isRoundTrip ? start : end;
   const canWander = start.trim().length > 0 && effectiveEnd.trim().length > 0 && (vibe !== "" || customVibe.trim().length > 0);
+
+  const vibePlaceholder = useMemo(() => {
+    const base = "or, describe your own vibe... e.g. ";
+    if (!advisorData?.weather_advice) {
+      return base + "'spicy noodles, vintage clothes, and a quiet place to read'";
+    }
+    const advice = advisorData.weather_advice.toLowerCase();
+    if (advice.includes("rain") || advice.includes("precipitation") || advice.includes("shower") || advice.includes("snow")) {
+      return base + "'cozy record cafes, covered book markets, and indie cinema'";
+    }
+    if (advice.includes("cold") || advice.includes("chill")) {
+      return base + "'warm ramen shops, steaming coffee, and museum galleries'";
+    }
+    if (advice.includes("hot") || advice.includes("warm") || advice.includes("clear") || advice.includes("sun")) {
+      return base + "'rooftop bars, park bench reading, and waterfront ice cream'";
+    }
+    return base + "'local record stores, hidden gardens, and quiet coffee shops'";
+  }, [advisorData?.weather_advice]);
 
   const formatTime = (mins: number) => {
     if (mins < 60) return `${mins} min`;
@@ -396,129 +526,87 @@ function InputScreen({
             )}
           </div>
 
-          {/* Presets Carousel — hidden when advisor has already flagged impossible */}
-          {start.trim().length > 0 && (presetsLoading || presets.length > 0) && advisorData?.feasibility_status !== "impossible" && (
-            <div className="mb-8 border-t border-[#f4f4f5]/6 pt-6">
-              <div className="flex items-center justify-between mb-4">
-                <p className="flex items-center gap-2 text-[#f4f4f5]/40 text-[11px] font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-inter)" }}>
-                  <Sparkles className="w-3.5 h-3.5 text-[#8ba88e]" strokeWidth={1.5} />
-                  suggested wanders for you
-                </p>
-                <button
-                  onClick={onRefreshPresets}
-                  disabled={presetsLoading || presetsRefreshing}
-                  className="p-1 rounded-full text-[#8ba88e]/50 hover:text-[#8ba88e] hover:bg-[#8ba88e]/10 transition-all disabled:opacity-30"
-                  title="get new suggestions"
-                >
-                  <RotateCcw className={`w-3.5 h-3.5 ${presetsRefreshing ? 'animate-spin' : ''}`} strokeWidth={1.5} />
-                </button>
-              </div>
-              
-              <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x">
-                {presetsLoading ? (
-                  Array.from({ length: 3 }).map((_, idx) => (
-                    <div 
-                      key={idx} 
-                      className="w-[200px] shrink-0 glass border border-[#f4f4f5]/6 rounded-2xl p-4 animate-pulse flex flex-col gap-2.5 min-h-[110px]"
-                    >
-                      <div className="h-4 bg-[#f4f4f5]/10 rounded w-3/4" />
-                      <div className="h-3 bg-[#f4f4f5]/5 rounded w-5/6" />
-                      <div className="flex gap-2">
-                        <div className="h-5 bg-[#f4f4f5]/10 rounded-full w-12" />
-                        <div className="h-5 bg-[#f4f4f5]/10 rounded-full w-16" />
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  presets.map((preset, idx) => {
-                    const companionEmojis: Record<string, string> = {
-                      solo: "🧍",
-                      date: "🕯️",
-                      friends: "🍻",
-                      pet: "🐶"
-                    };
-                    
-                    return (
-                      <motion.button
-                        key={idx}
-                        type="button"
-                        onClick={() => {
-                          setCustomVibe(preset.vibe);
-                          setVibe("");
-                          setTimeBudget(preset.time_budget);
-                          setNumStops(preset.num_stops);
-                          setHasManuallySetStops(false);
-                          setFreeOnly(preset.free_only);
-                          setCompanion(preset.companion);
-                          setSelectedPresetIdx(idx);
-                          // Scroll to wander button so user sees their selection applied
-                          setTimeout(() => {
-                            document.getElementById('wander-button')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                          }, 150);
-                        }}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        className={`w-[220px] shrink-0 glass border text-left p-4 rounded-2xl cursor-pointer transition-all duration-300 flex flex-col justify-between min-h-[125px] snap-start ${
-                          selectedPresetIdx === idx
-                            ? 'border-[#8ba88e]/60 shadow-[0_0_20px_rgba(139,168,142,0.2)] bg-[#8ba88e]/5'
-                            : 'border-[#f4f4f5]/6 hover:border-[#8ba88e]/30'
-                        }`}
-                      >
-                        <div>
-                          <h4 className="text-[#f4f4f5] text-[13px] font-semibold tracking-wide mb-1 lowercase" style={{ fontFamily: "var(--font-inter)" }}>
-                            {preset.title}
-                          </h4>
-                          <p className="text-[#f4f4f5]/50 text-[10px] leading-relaxed mb-3 lowercase font-light" style={{ fontFamily: "var(--font-inter)" }}>
-                            {preset.reason}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5 mt-auto">
-                          <span className="px-2 py-0.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/60 text-[9px] font-light uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>
-                            {companionEmojis[preset.companion] || "🧍"} {preset.companion}
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/60 text-[9px] font-light uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>
-                            📍 {preset.num_stops} stops
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/60 text-[9px] font-light uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>
-                            ⏱️ {preset.time_budget}m
-                          </span>
-                          {preset.free_only && (
-                            <span className="px-2 py-0.5 rounded-full bg-[#8ba88e]/10 text-[#8ba88e] text-[9px] font-medium uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>
-                              free
-                            </span>
-                          )}
-                        </div>
-                      </motion.button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          )}
 
-          {/* Time Budget */}
+
+          {/* Slider Mode Toggle */}
+          <div className="flex gap-2.5 mb-5 p-1 rounded-xl bg-[#f4f4f5]/3 border border-[#f4f4f5]/6">
+            <button
+              type="button"
+              onClick={() => setInputMode("time")}
+              className={`flex-1 py-1.5 rounded-lg text-center text-[11px] font-semibold tracking-wide transition-all ${
+                inputMode === "time"
+                  ? "bg-[#8ba88e]/18 text-[#8ba88e] border border-[#8ba88e]/30"
+                  : "text-[#f4f4f5]/40 hover:text-[#f4f4f5]/70 cursor-pointer"
+              }`}
+              style={{ fontFamily: "var(--font-inter)" }}
+            >
+              time budget
+            </button>
+            <button
+              type="button"
+              onClick={() => setInputMode("steps")}
+              className={`flex-1 py-1.5 rounded-lg text-center text-[11px] font-semibold tracking-wide transition-all ${
+                inputMode === "steps"
+                  ? "bg-[#8ba88e]/18 text-[#8ba88e] border border-[#8ba88e]/30"
+                  : "text-[#f4f4f5]/40 hover:text-[#f4f4f5]/70 cursor-pointer"
+              }`}
+              style={{ fontFamily: "var(--font-inter)" }}
+            >
+              step goal
+            </button>
+          </div>
+
+          {/* Time Budget or Step Goal Slider */}
           <div className="mb-8">
-            <div className="flex items-center justify-between mb-4">
-              <label htmlFor="time-budget" className="flex items-center gap-2 text-[#f4f4f5]/40 text-[12px] font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-inter)" }}>
-                <Clock className="w-3.5 h-3.5" strokeWidth={1.5} />
-                time to wander
-              </label>
-              <span className="text-[#e5d3b3] text-sm font-medium" style={{ fontFamily: "var(--font-inter)" }}>
-                {formatTime(timeBudget)}
-              </span>
-            </div>
-            <input
-              id="time-budget"
-              type="range"
-              min={30}
-              max={240}
-              step={15}
-              value={timeBudget}
-              onChange={(e) => setTimeBudget(Number(e.target.value))}
-            />
-            <div className="flex justify-between text-[#f4f4f5]/20 text-[11px] mt-2.5 font-light" style={{ fontFamily: "var(--font-inter)" }}>
-              <span>30 min</span><span>2 hours</span><span>4 hours</span>
-            </div>
+            {inputMode === "time" ? (
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <label htmlFor="time-budget" className="flex items-center gap-2 text-[#f4f4f5]/40 text-[12px] font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-inter)" }}>
+                    <Clock className="w-3.5 h-3.5" strokeWidth={1.5} />
+                    time to wander
+                  </label>
+                  <span className="text-[#e5d3b3] text-sm font-medium" style={{ fontFamily: "var(--font-inter)" }}>
+                    {formatTime(timeBudget)}
+                  </span>
+                </div>
+                <input
+                  id="time-budget"
+                  type="range"
+                  min={30}
+                  max={240}
+                  step={15}
+                  value={timeBudget}
+                  onChange={(e) => setTimeBudget(Number(e.target.value))}
+                />
+                <div className="flex justify-between text-[#f4f4f5]/20 text-[11px] mt-2.5 font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                  <span>30 min</span><span>2 hours</span><span>4 hours</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <label htmlFor="step-goal" className="flex items-center gap-2 text-[#f4f4f5]/40 text-[12px] font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-inter)" }}>
+                    <Footprints className="w-3.5 h-3.5 text-[#8ba88e]" strokeWidth={1.5} />
+                    target step goal
+                  </label>
+                  <span className="text-[#e5d3b3] text-sm font-medium" style={{ fontFamily: "var(--font-inter)" }}>
+                    {stepGoal.toLocaleString()} steps
+                  </span>
+                </div>
+                <input
+                  id="step-goal"
+                  type="range"
+                  min={3000}
+                  max={15000}
+                  step={1000}
+                  value={stepGoal}
+                  onChange={(e) => setStepGoal(Number(e.target.value))}
+                />
+                <div className="flex justify-between text-[#f4f4f5]/20 text-[11px] mt-2.5 font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                  <span>3k steps</span><span>9k steps</span><span>15k steps</span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Vibe Selector */}
@@ -526,7 +614,7 @@ function InputScreen({
             <p className="text-[#f4f4f5]/40 text-[12px] font-medium tracking-widest uppercase mb-4" style={{ fontFamily: "var(--font-inter)" }}>
               your vibe
             </p>
-            {/* e) Show badge when custom vibe overrides presets */}
+            {/* e) Show badge when custom vibe is active */}
             {customVibe.trim() && (
               <div className="flex items-center gap-2 mb-3">
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#8ba88e]/12 border border-[#8ba88e]/30 text-[#8ba88e] text-[11px] font-medium" style={{ fontFamily: "var(--font-inter)" }}>
@@ -574,7 +662,7 @@ function InputScreen({
             <div className="relative">
               <textarea
                 id="custom-vibe"
-                placeholder="or, describe your own vibe... e.g. 'spicy noodles, vintage clothes, and a quiet place to read'"
+                placeholder={vibePlaceholder}
                 value={customVibe}
                 onChange={(e) => {
                   setCustomVibe(e.target.value);
@@ -649,6 +737,53 @@ function InputScreen({
               </button>
             </div>
 
+            {/* Avoid Steep Slopes (Flat walks only) */}
+            <div className="flex items-center justify-between border-t border-[#f4f4f5]/6 pt-4 mt-4">
+              <span className="text-[#f4f4f5]/60 text-xs font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                avoid steep slopes (flat walks only)
+              </span>
+              <button
+                id="avoid-slopes-toggle"
+                type="button"
+                role="switch"
+                aria-checked={avoidSlopes}
+                onClick={() => setAvoidSlopes(!avoidSlopes)}
+                className={`w-10 h-6 rounded-full transition-colors duration-200 focus:outline-none flex items-center p-0.5 cursor-pointer ${
+                  avoidSlopes ? 'bg-[#8ba88e]' : 'bg-[#f4f4f5]/10'
+                }`}
+              >
+                <div
+                  className={`w-5 h-5 rounded-full bg-[#131316] shadow-md transform transition-transform duration-200 ${
+                    avoidSlopes ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Max Budget per Person */}
+            <div className="border-t border-[#f4f4f5]/6 pt-4 mt-4">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-[#f4f4f5]/60 text-xs font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                  max budget per person
+                </span>
+                <span className="text-[#e5d3b3] text-xs font-medium" style={{ fontFamily: "var(--font-inter)" }}>
+                  {maxBudget === 150 ? "unlimited" : `$${maxBudget}`}
+                </span>
+              </div>
+              <input
+                id="max-budget"
+                type="range"
+                min={10}
+                max={150}
+                step={5}
+                value={maxBudget}
+                onChange={(e) => setMaxBudget(Number(e.target.value))}
+              />
+              <div className="flex justify-between text-[#f4f4f5]/25 text-[10px] mt-1 font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                <span>$10</span><span>$50</span><span>$100</span><span>unlimited</span>
+              </div>
+            </div>
+
             {/* Companion Row */}
             <div className="border-t border-[#f4f4f5]/6 pt-4 mt-4">
               <span className="text-[#f4f4f5]/60 text-xs font-light block mb-3" style={{ fontFamily: "var(--font-inter)" }}>
@@ -683,69 +818,24 @@ function InputScreen({
             </div>
           </div>
 
-          {/* AI Pacing & Feasibility Advisor */}
-          {start.trim().length > 0 && end.trim().length > 0 && (advisorLoading || advisorData) && (
-            <div className="mb-6">
-              {advisorLoading ? (
-                <div className="glass border border-[#f4f4f5]/6 rounded-2xl p-4 animate-pulse flex items-center gap-3">
-                  <Loader2 className="w-4 h-4 text-[#8ba88e] animate-spin shrink-0" />
-                  <span className="text-[#f4f4f5]/40 text-xs font-light lowercase" style={{ fontFamily: "var(--font-inter)" }}>
-                    reading your neighborhood...
-                  </span>
-                </div>
-              ) : (
-                advisorData && (() => {
-                  // Client-side override wins when sliders produce impossible/tight state
-                  const effectiveStatus = clientFeasibility?.status ?? advisorData.feasibility_status;
-                  const effectiveMessage = clientFeasibility?.message ?? advisorData.pacing_message;
-                  return (
-                    <motion.div
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className={`glass border-l-4 rounded-2xl p-4 shadow-md flex flex-col gap-2 ${
-                        effectiveStatus === "optimal"
-                          ? "border-l-[#8ba88e] border-y border-r border-[#f4f4f5]/6 bg-[#8ba88e]/2"
-                          : effectiveStatus === "tight"
-                          ? "border-l-[#e5d3b3] border-y border-r border-[#f4f4f5]/6 bg-[#e5d3b3]/2"
-                          : "border-l-[#ef4444] border-y border-r border-[#f4f4f5]/6 bg-[#ef4444]/2"
-                      }`}
-                    >
-                      <div className="flex items-start gap-2.5">
-                        <Sparkles className={`w-4 h-4 shrink-0 mt-0.5 ${
-                          effectiveStatus === "optimal"
-                            ? "text-[#8ba88e]"
-                            : effectiveStatus === "tight"
-                            ? "text-[#e5d3b3]"
-                            : "text-[#ef4444]"
-                        }`} strokeWidth={1.5} />
-                        <div className="flex-1">
-                          <p className="text-[#f4f4f5] text-[12px] font-normal leading-relaxed lowercase" style={{ fontFamily: "var(--font-inter)" }}>
-                            {effectiveMessage}
-                          </p>
-
-                          {/* Only show badges when not overridden by client */}
-                          {!clientFeasibility && (
-                            <div className="flex flex-wrap gap-2 mt-2">
-                              {advisorData.density_badge_message && (
-                                <span className="px-2 py-0.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/40 text-[9px] font-light lowercase" style={{ fontFamily: "var(--font-inter)" }}>
-                                  {advisorData.density_badge_message}
-                                </span>
-                              )}
-                              {advisorData.weather_advice && (
-                                <span className="px-2 py-0.5 rounded-full bg-[#8ba88e]/10 text-[#8ba88e]/80 text-[9px] font-light lowercase" style={{ fontFamily: "var(--font-inter)" }}>
-                                  ✨ {advisorData.weather_advice}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </motion.div>
-                  );
-                })()
-              )}
-            </div>
-          )}
+          {/* Feasibility check — only surface impossible, nothing else */}
+          {(() => {
+            const effectiveStatus = clientFeasibility?.status ?? advisorData?.feasibility_status;
+            const effectiveMessage = clientFeasibility?.message ?? advisorData?.pacing_message;
+            if (effectiveStatus !== "impossible") return null;
+            return (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-6 glass border-l-4 border-l-[#ef4444] border-y border-r border-[#f4f4f5]/6 rounded-2xl p-4 flex items-start gap-2.5"
+              >
+                <X className="w-4 h-4 text-[#ef4444] shrink-0 mt-0.5" strokeWidth={2} />
+                <p className="text-[#f4f4f5]/80 text-[12px] font-light leading-relaxed lowercase" style={{ fontFamily: "var(--font-inter)" }}>
+                  {effectiveMessage}
+                </p>
+              </motion.div>
+            );
+          })()}
 
           {/* f) Static hint above CTA when disabled */}
           {!canWander && (
@@ -842,6 +932,44 @@ function LoadingScreen({ message }: { message: string }) {
   );
 }
 
+// ── Waypoint Vibe Theme Style Helper ──
+const getVibeStyle = (vibeTag: string) => {
+  const t = vibeTag.toLowerCase();
+  if (t.includes("scenic") || t.includes("green") || t.includes("park") || t.includes("garden") || t.includes("nature") || t.includes("outdoor")) {
+    return {
+      gradient: "from-[#8ba88e]/20 to-[#1b221c]",
+      iconColor: "text-[#8ba88e]/20",
+      icon: Leaf,
+    };
+  }
+  if (t.includes("coffee") || t.includes("cafe") || t.includes("culture") || t.includes("caffeinated") || t.includes("art") || t.includes("museum") || t.includes("book") || t.includes("library") || t.includes("historic") || t.includes("history")) {
+    return {
+      gradient: "from-[#e5d3b3]/25 to-[#221e1b]",
+      iconColor: "text-[#e5d3b3]/20",
+      icon: Coffee,
+    };
+  }
+  if (t.includes("social") || t.includes("playful") || t.includes("adventurous") || t.includes("fun") || t.includes("games") || t.includes("nightlife") || t.includes("bar") || t.includes("drinks") || t.includes("pub")) {
+    return {
+      gradient: "from-[#e2cc8f]/20 to-[#22211b]",
+      iconColor: "text-[#e2cc8f]/20",
+      icon: Zap,
+    };
+  }
+  if (t.includes("quiet") || t.includes("retreat") || t.includes("mental") || t.includes("break") || t.includes("peaceful") || t.includes("serene")) {
+    return {
+      gradient: "from-[#8ba88e]/15 to-[#131316]",
+      iconColor: "text-[#8ba88e]/15",
+      icon: Timer,
+    };
+  }
+  return {
+    gradient: "from-[#8ba88e]/12 to-[#131316]",
+    iconColor: "text-[#8ba88e]/10",
+    icon: Sparkles,
+  };
+};
+
 // ── Waypoint Card ─────────────────────────────────────────────────────────────
 
 function WaypointCard({
@@ -850,19 +978,45 @@ function WaypointCard({
   isVisited = false,
   dwellSeconds = 0,
   onManualCheckIn,
+  vibe,
+  onSwapWaypoint,
+  isSwapping = false,
 }: {
   waypoint: WaypointV3;
   isNearby?: boolean;
   isVisited?: boolean;
   dwellSeconds?: number;
   onManualCheckIn?: () => void;
+  vibe: VibeId | "";
+  onSwapWaypoint?: (index: number, customRefinement?: string) => Promise<void>;
+  isSwapping?: boolean;
 }) {
   const [tipOpen, setTipOpen] = useState(false);
+  const [swapMenuOpen, setSwapMenuOpen] = useState(false);
+  const [customInput, setCustomInput] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
-  const dwellPercent = Math.min(100, (dwellSeconds / 300) * 100);
+  useEffect(() => {
+    if (!swapMenuOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSwapMenuOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [swapMenuOpen]);
+
+  const targetSeconds = (waypoint.duration_mins || 30) * 60;
+  const dwellPercent = Math.min(100, (dwellSeconds / targetSeconds) * 100);
 
   return (
-    <motion.div variants={cardVariants}>
+    <motion.div
+      variants={cardVariants}
+      whileHover={{ y: -3 }}
+      transition={{ type: "spring", stiffness: 300, damping: 20 }}
+    >
       <div
         className={`glass-lighter rounded-2xl overflow-hidden relative transition-all duration-500 ${
           isVisited ? "opacity-50" : ""
@@ -890,14 +1044,15 @@ function WaypointCard({
           </div>
         )}
 
-        {/* ── Photo Banner ── */}
-        {waypoint.photo_url && (
-          <div className="relative w-full h-40 overflow-hidden">
+        {/* ── Photo Banner or Fallback ── */}
+        {waypoint.photo_url && !imageError ? (
+          <div className="relative w-full h-40 overflow-hidden bg-[#131316]">
             <img
               src={waypoint.photo_url}
               alt={waypoint.location_name}
               className="w-full h-full object-cover"
               loading="lazy"
+              onError={() => setImageError(true)}
             />
             {/* gradient fade into card background */}
             <div
@@ -923,56 +1078,82 @@ function WaypointCard({
               </span>
             )}
           </div>
+        ) : (
+          (() => {
+            const vs = getVibeStyle(waypoint.vibe_tag || "");
+            const FallbackIcon = vs.icon;
+            return (
+              <div className={`relative w-full h-40 bg-gradient-to-br ${vs.gradient} flex items-center justify-center overflow-hidden`}>
+                <FallbackIcon className={`w-14 h-14 ${vs.iconColor}`} strokeWidth={1.2} />
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    background: "linear-gradient(to bottom, transparent 40%, #131316 100%)",
+                  }}
+                />
+                {/* vibe tag floated */}
+                <span
+                  className="absolute top-3 left-3 inline-block px-2.5 py-0.5 rounded-full bg-[#131316]/70 backdrop-blur-sm text-[#8ba88e] text-[10px] font-medium tracking-wider uppercase"
+                  style={{ fontFamily: "var(--font-inter)" }}
+                >
+                  {waypoint.vibe_tag}
+                </span>
+                {/* rating floated */}
+                {waypoint.google_rating != null && (
+                  <span
+                    className="absolute top-3 right-3 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#131316]/70 backdrop-blur-sm text-[#e5d3b3] text-[11px] font-medium"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                  >
+                    ★ {waypoint.google_rating.toFixed(1)}
+                  </span>
+                )}
+              </div>
+            );
+          })()
         )}
 
         <div className="p-5">
-          {/* vibe tag — only shown when no photo (photo shows it above) */}
-          {!waypoint.photo_url && (
-            <span
-              className="inline-block px-2.5 py-0.5 rounded-full bg-[#8ba88e]/10 text-[#8ba88e] text-[10px] font-medium tracking-wider uppercase mb-3"
-              style={{ fontFamily: "var(--font-inter)" }}
-            >
-              {waypoint.vibe_tag}
-            </span>
-          )}
-
           <div className="flex items-start justify-between gap-2 mb-1">
-            {waypoint.place_id ? (
-              <a
-                href={`https://www.google.com/maps/place/?q=place_id:${waypoint.place_id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[#f4f4f5] hover:text-[#8ba88e] transition-colors text-xl font-semibold leading-tight flex items-center gap-2 group"
-                style={{ fontFamily: "var(--font-playfair)" }}
-              >
-                {waypoint.location_name}
-                <ExternalLink className="w-4 h-4 shrink-0 text-[#f4f4f5]/30 group-hover:text-[#8ba88e] transition-colors" strokeWidth={1.5} />
-              </a>
-            ) : (
-              <h3
-                className="text-[#f4f4f5] text-xl font-semibold leading-tight"
-                style={{ fontFamily: "var(--font-playfair)" }}
-              >
-                {waypoint.location_name}
-              </h3>
-            )}
-            {/* rating badge — only shown when no photo (photo shows it above) */}
-            {!waypoint.photo_url && waypoint.google_rating != null && (
-              <span
-                className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#e5d3b3]/8 border border-[#e5d3b3]/15 text-[#e5d3b3]/70 text-[11px] font-medium mt-1"
-                style={{ fontFamily: "var(--font-inter)" }}
-              >
-                ★ {waypoint.google_rating.toFixed(1)}
-              </span>
-            )}
+            {(() => {
+              const mapsUrl = waypoint.place_id && !waypoint.place_id.startsWith("otm:") && !waypoint.place_id.startsWith("fsq:")
+                ? `https://www.google.com/maps/place/?q=place_id:${waypoint.place_id}`
+                : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(waypoint.location_name + ", " + (waypoint.address_hint || ""))}`;
+              return (
+                <a
+                  href={mapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#f4f4f5] hover:text-[#8ba88e] transition-colors text-xl font-semibold leading-tight flex items-center gap-2 group"
+                  style={{ fontFamily: "var(--font-playfair)" }}
+                >
+                  {waypoint.location_name}
+                  <ExternalLink className="w-4 h-4 shrink-0 text-[#f4f4f5]/30 group-hover:text-[#8ba88e] transition-colors" strokeWidth={1.5} />
+                </a>
+              );
+            })()}
           </div>
-          <p
-            className="text-[#f4f4f5]/30 text-[12px] font-light mb-4 flex items-center gap-1.5"
+          <button
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(waypoint.address_hint);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              } catch (err) {
+                console.error("failed to copy address", err);
+              }
+            }}
+            className="text-[#f4f4f5]/30 hover:text-[#8ba88e] text-[12px] font-light mb-4 flex items-center gap-1.5 transition-colors cursor-pointer text-left focus:outline-none"
             style={{ fontFamily: "var(--font-inter)" }}
+            title="Click to copy address"
           >
             <MapPin className="w-3 h-3 shrink-0" strokeWidth={1.5} />
-            {waypoint.address_hint}
-          </p>
+            <span className="truncate">{waypoint.address_hint}</span>
+            {copied && (
+              <span className="text-[10px] text-[#8ba88e] font-medium ml-1 shrink-0">
+                (copied!)
+              </span>
+            )}
+          </button>
           <p
             className="text-[#f4f4f5]/65 text-[14px] font-light leading-relaxed mb-4"
             style={{ fontFamily: "var(--font-inter)" }}
@@ -1014,33 +1195,54 @@ function WaypointCard({
             </div>
           )}
 
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-1.5 text-[#e5d3b3]/60 text-[12px] font-light" style={{ fontFamily: "var(--font-inter)" }}>
-                {isVisited ? (
-                  <CheckCircle2 className="w-3.5 h-3.5 text-[#8ba88e]" strokeWidth={1.5} />
-                ) : (
-                  <Timer className="w-3.5 h-3.5" strokeWidth={1.5} />
-                )}
-                {isVisited ? "visited" : `${waypoint.duration_mins} min`}
-              </div>
-              {waypoint.lat && waypoint.lng && (
-                 <a
-                    href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${waypoint.lat},${waypoint.lng}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 text-[#e5d3b3]/50 hover:text-[#e5d3b3]/80 text-[12px] font-medium transition-colors"
-                    style={{ fontFamily: "var(--font-inter)" }}
-                 >
-                   <MapPin className="w-3.5 h-3.5" strokeWidth={1.5} />
-                   Street View
-                 </a>
+          {/* Metadata Row */}
+          <div className="flex items-center gap-6 text-[12px] text-[#e5d3b3]/60 mb-3 font-light" style={{ fontFamily: "var(--font-inter)" }}>
+            <div className="flex items-center gap-1 whitespace-nowrap">
+              {isVisited ? (
+                <CheckCircle2 className="w-3.5 h-3.5 text-[#8ba88e]" strokeWidth={1.5} />
+              ) : (
+                <Timer className="w-3.5 h-3.5" strokeWidth={1.5} />
               )}
+              <span>{isVisited ? "visited" : `${waypoint.duration_mins} min`}</span>
             </div>
+            {waypoint.estimated_cost_usd !== undefined && (
+              <div className="flex items-center gap-1 whitespace-nowrap">
+                <span className="opacity-50">Est. spend:</span>
+                <span className="font-semibold text-[#e5d3b3]">
+                  {waypoint.estimated_cost_usd === 0 ? "Free" : `$${waypoint.estimated_cost_usd}`}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Actions Row */}
+          <div className="flex items-center justify-between pt-3 border-t border-[#f4f4f5]/6 text-[12px] gap-4">
+            {waypoint.lat && waypoint.lng && (
+               <a
+                  href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${waypoint.lat},${waypoint.lng}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-[#e5d3b3]/50 hover:text-[#e5d3b3]/80 font-medium transition-colors whitespace-nowrap"
+                  style={{ fontFamily: "var(--font-inter)" }}
+               >
+                 <MapPin className="w-3.5 h-3.5" strokeWidth={1.5} />
+                 Street View
+               </a>
+            )}
+            {onSwapWaypoint && !isVisited && (
+              <button
+                onClick={() => setSwapMenuOpen((o) => !o)}
+                className={`flex items-center gap-1 font-medium transition-colors whitespace-nowrap cursor-pointer ${swapMenuOpen ? 'text-[#8ba88e]' : 'text-[#e5d3b3]/50 hover:text-[#e5d3b3]/80'}`}
+                style={{ fontFamily: "var(--font-inter)" }}
+              >
+                <Wand2 className="w-3.5 h-3.5" strokeWidth={1.5} />
+                swap stop
+              </button>
+            )}
             <button
               id={`tip-toggle-${waypoint.order}`}
               onClick={() => setTipOpen((o) => !o)}
-              className="flex items-center gap-1.5 text-[#e5d3b3]/50 hover:text-[#e5d3b3]/80 text-[12px] font-medium transition-colors"
+              className="flex items-center gap-1 text-[#e5d3b3]/50 hover:text-[#e5d3b3]/80 font-medium transition-colors whitespace-nowrap cursor-pointer"
               style={{ fontFamily: "var(--font-inter)" }}
             >
               <Lightbulb className="w-3.5 h-3.5" strokeWidth={1.5} />
@@ -1067,7 +1269,83 @@ function WaypointCard({
               </motion.div>
             )}
           </AnimatePresence>
+
+          <AnimatePresence>
+            {swapMenuOpen && !isVisited && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                animate={{ opacity: 1, height: "auto", marginTop: 12 }}
+                exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                transition={{ duration: 0.3, ease: "easeInOut" }}
+                className="overflow-hidden border-t border-[#e5d3b3]/8 pt-3 mt-3 flex flex-col gap-2.5"
+              >
+                <p className="text-[#e5d3b3]/45 text-[11px] font-medium tracking-wide lowercase" style={{ fontFamily: "var(--font-inter)" }}>
+                  swap this stop for something else
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      setSwapMenuOpen(false);
+                      if (onSwapWaypoint) await onSwapWaypoint(waypoint.order - 1);
+                    }}
+                    className="flex-1 py-1.5 rounded-xl bg-[#e5d3b3]/10 border border-[#e5d3b3]/15 text-[#e5d3b3]/80 hover:bg-[#e5d3b3]/18 transition-all flex items-center justify-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    surprise me
+                  </button>
+                </div>
+                <div className="relative flex items-center">
+                  <input
+                    type="text"
+                    placeholder="what are you in the mood for instead?..."
+                    value={customInput}
+                    onChange={(e) => setCustomInput(e.target.value)}
+                    className="w-full bg-[#131316]/50 border border-[#e5d3b3]/15 rounded-xl py-2 pl-3 pr-10 text-[13px] text-[#f4f4f5] placeholder-[#f4f4f5]/30 focus:outline-none focus:border-[#8ba88e]/40 transition-colors font-light"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                    onKeyDown={async (e) => {
+                      if (e.key === "Enter" && customInput.trim()) {
+                        setSwapMenuOpen(false);
+                        const val = customInput;
+                        setCustomInput("");
+                        if (onSwapWaypoint) await onSwapWaypoint(waypoint.order - 1, val);
+                      }
+                    }}
+                  />
+                  <button
+                    disabled={!customInput.trim()}
+                    onClick={async () => {
+                      setSwapMenuOpen(false);
+                      const val = customInput;
+                      setCustomInput("");
+                      if (onSwapWaypoint) await onSwapWaypoint(waypoint.order - 1, val);
+                    }}
+                    className="absolute right-2 p-1.5 rounded-lg text-[#8ba88e]/80 hover:text-[#8ba88e] disabled:opacity-30 transition-opacity"
+                  >
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
+
+        {/* Swapping/loading overlay */}
+        <AnimatePresence>
+          {isSwapping && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-[#131316]/75 backdrop-blur-md z-20 flex flex-col items-center justify-center gap-3"
+            >
+              <div className="w-5 h-5 rounded-full border-2 border-[#8ba88e]/30 border-t-[#8ba88e] animate-spin" />
+              <span className="text-[12px] text-[#8ba88e] font-medium tracking-wide lowercase" style={{ fontFamily: "var(--font-inter)" }}>
+                swapping stop...
+              </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </motion.div>
   );
@@ -1288,6 +1566,8 @@ export function RouteScreen({
   isSharedView = false,
   weatherContext,
   addPassportStamp,
+  comfortMode = false,
+  maxBudget = 50,
 }: {
   data: WanderV3Response;
   vibe: VibeId | "";
@@ -1295,9 +1575,96 @@ export function RouteScreen({
   isSharedView?: boolean;
   weatherContext?: string | null;
   addPassportStamp?: (entry: PassportEntry) => void;
+  comfortMode?: boolean;
+  maxBudget?: number;
 }) {
+  const [routes, setRoutes] = useState<WanderRouteOptionV3[]>(data.routes || []);
+  const [swappingIndex, setSwappingIndex] = useState<number | null>(null);
+
+  const [isFetchingDetour, setIsFetchingDetour] = useState(false);
+  const [detourWaypoint, setDetourWaypoint] = useState<any | null>(null);
+  const [detourWalkMins, setDetourWalkMins] = useState<number | null>(null);
+  const [detourModalOpen, setDetourModalOpen] = useState(false);
+  const [detourImageError, setDetourImageError] = useState(false);
+
+  useEffect(() => {
+    if (data?.routes) {
+      setRoutes(data.routes);
+    }
+  }, [data?.routes]);
+
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const activeRoute = data.routes[selectedIndex];
+  const activeRoute = routes[selectedIndex];
+  const [isIOS, setIsIOS] = useState(false);
+
+  useEffect(() => {
+    if (typeof navigator !== "undefined") {
+      setIsIOS(/iPad|iPhone|iPod/.test(navigator.userAgent));
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA"
+      ) {
+        return;
+      }
+      if (e.key === "1") {
+        if (routes[0]) setSelectedIndex(0);
+      } else if (e.key === "2") {
+        if (routes[1]) setSelectedIndex(1);
+      } else if (e.key === "3") {
+        if (routes[2]) setSelectedIndex(2);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [routes, setSelectedIndex]);
+
+  useEffect(() => {
+    if (!routes[selectedIndex]) {
+      const firstAvailableIdx = routes.findIndex(r => !!r);
+      if (firstAvailableIdx !== -1) {
+        setSelectedIndex(firstAvailableIdx);
+      }
+    }
+  }, [routes, selectedIndex]);
+
+  const handleSwapWaypoint = async (idx: number, customRefinement?: string) => {
+    if (!activeRoute) return;
+    setSwappingIndex(idx);
+    try {
+      const res = await fetch("/api/swap-waypoint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          route: activeRoute,
+          index: idx,
+          vibe: vibe || "custom",
+          custom_refinement: customRefinement || null,
+          max_budget_usd: maxBudget
+        })
+      });
+      if (res.ok) {
+        const updatedRoute = await res.json();
+        setRoutes((prevRoutes) => {
+          const next = [...prevRoutes];
+          next[selectedIndex] = updatedRoute;
+          return next;
+        });
+      } else {
+        const err = await res.json();
+        alert(err.detail || "Failed to swap waypoint");
+      }
+    } catch (err) {
+      console.error("Error swapping waypoint:", err);
+      alert("An error occurred while swapping the waypoint.");
+    } finally {
+      setSwappingIndex(null);
+    }
+  };
 
   const [isSharing, setIsSharing] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
@@ -1350,6 +1717,7 @@ export function RouteScreen({
 
   const {
     walkModeActive,
+    userPosition,
     proximityStopIdx,
     checkedInStops,
     dwellSeconds,
@@ -1361,6 +1729,159 @@ export function RouteScreen({
     geoError,
     stopsWithoutCoords,
   } = useWalkMode(walkWaypoints, handleCheckIn);
+
+  const handleTriggerDetour = async () => {
+    if (!activeRoute) return;
+    setIsFetchingDetour(true);
+    setDetourWaypoint(null);
+    setDetourWalkMins(null);
+    setDetourImageError(false);
+    
+    let lat: number | null = userPosition?.lat ?? null;
+    let lng: number | null = userPosition?.lng ?? null;
+
+    if (lat === null || lng === null) {
+      if (navigator.geolocation) {
+        try {
+          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 5000
+            });
+          });
+          lat = pos.coords.latitude;
+          lng = pos.coords.longitude;
+        } catch (e) {
+          console.warn("Could not retrieve GPS coordinates for detour, falling back to active route start location or default Manhattan", e);
+        }
+      }
+    }
+
+    if (lat === null || lng === null) {
+      lat = activeRoute.start_lat ?? activeRoute.waypoints[0]?.lat ?? 40.7128;
+      lng = activeRoute.start_lng ?? activeRoute.waypoints[0]?.lng ?? -74.0060;
+    }
+
+    try {
+      const res = await fetch("/api/vibe-detour", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lat,
+          lng,
+          vibe: vibe || "custom",
+          max_budget_usd: maxBudget,
+          current_itinerary_place_ids: activeRoute.waypoints.map(w => w.place_id).filter(Boolean)
+        })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setDetourWaypoint(d.waypoint);
+        setDetourWalkMins(d.walk_to_detour_mins);
+        setDetourModalOpen(true);
+      } else {
+        const err = await res.json();
+        alert(err.detail || "No suitable detours found nearby.");
+      }
+    } catch (err) {
+      console.error("Error triggering detour:", err);
+      alert("Failed to find a detour stop nearby.");
+    } finally {
+      setIsFetchingDetour(false);
+    }
+  };
+
+  const handlePivotRoute = async () => {
+    if (!activeRoute || !detourWaypoint) return;
+    const indexToSwap = currentStopIdx < activeRoute.waypoints.length ? currentStopIdx : activeRoute.waypoints.length - 1;
+    if (indexToSwap < 0) return;
+    
+    try {
+      const res = await fetch("/api/pivot-route", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          route: activeRoute,
+          detour_waypoint: detourWaypoint,
+          index: indexToSwap
+        })
+      });
+      if (res.ok) {
+        const updatedRoute = await res.json();
+        setRoutes((prevRoutes) => {
+          const next = [...prevRoutes];
+          next[selectedIndex] = updatedRoute;
+          return next;
+        });
+        setDetourModalOpen(false);
+      } else {
+        const err = await res.json();
+        alert(err.detail || "Failed to pivot route");
+      }
+    } catch (err) {
+      console.error("Error pivoting route:", err);
+      alert("Failed to pivot route.");
+    }
+  };
+
+  // Device shake listener for spontaneous detour
+  useEffect(() => {
+    if (!walkModeActive) return;
+
+    let lastX: number | null = null;
+    let lastY: number | null = null;
+    let lastZ: number | null = null;
+    let lastUpdate = 0;
+    const SHAKE_THRESHOLD = 15; // sensitivity threshold
+
+    const handleMotion = (event: DeviceMotionEvent) => {
+      const acceleration = event.accelerationIncludingGravity;
+      if (!acceleration) return;
+
+      const currTime = Date.now();
+      if (currTime - lastUpdate > 100) {
+        const diffTime = currTime - lastUpdate;
+        lastUpdate = currTime;
+
+        const x = acceleration.x ?? 0;
+        const y = acceleration.y ?? 0;
+        const z = acceleration.z ?? 0;
+
+        if (lastX !== null && lastY !== null && lastZ !== null) {
+          const speed = (Math.abs(x + y + z - lastX - lastY - lastZ) / diffTime) * 10000;
+          if (speed > SHAKE_THRESHOLD) {
+            // Trigger detour if not already loading or open
+            if (!isFetchingDetour && !detourModalOpen) {
+              handleTriggerDetour();
+            }
+          }
+        }
+        lastX = x;
+        lastY = y;
+        lastZ = z;
+      }
+    };
+
+    if (
+      typeof window !== "undefined" &&
+      typeof (DeviceMotionEvent as any).requestPermission === "function"
+    ) {
+      (DeviceMotionEvent as any)
+        .requestPermission()
+        .then((permissionState: string) => {
+          if (permissionState === "granted") {
+            window.addEventListener("devicemotion", handleMotion);
+          }
+        })
+        .catch(console.error);
+    } else {
+      window.addEventListener("devicemotion", handleMotion);
+    }
+
+    return () => {
+      window.removeEventListener("devicemotion", handleMotion);
+    };
+  }, [walkModeActive, isFetchingDetour, detourModalOpen, userPosition]);
 
   const handleShare = async () => {
     if (!activeRoute) return;
@@ -1378,7 +1899,12 @@ export function RouteScreen({
         const data = await res.json();
         const url = `${window.location.origin}/r/${data.id}`;
         setShareUrl(url);
-        await navigator.clipboard.writeText(url);
+        const waypointNames = activeRoute.waypoints.map((w, idx) => `${idx + 1}. ${w.location_name}`).join(" -> ");
+        const costStr = activeRoute.estimated_total_cost_usd !== undefined
+          ? `\nEst. Spend: ${activeRoute.estimated_total_cost_usd === 0 ? "Free" : `$${activeRoute.estimated_total_cost_usd}`}`
+          : "";
+        const shareText = `Wander Route: ${activeRoute.route_name}\nWaypoints: ${waypointNames}\nDuration: ${activeRoute.total_walking_time_mins} minutes total${costStr}\nDetails: ${url}`;
+        await navigator.clipboard.writeText(shareText);
         setTimeout(() => setShareUrl(null), 3000);
       }
     } catch (e) {
@@ -1513,7 +2039,7 @@ export function RouteScreen({
           >
             {/* c) Tabs with stronger active/inactive affordance */}
             {[0, 1, 2].map((i) => {
-              const route = data.routes[i];
+              const route = routes[i];
               const isLoading = !route;
               const tabTitle = route ? route.route_name : `route ${i + 1}…`;
               const isSelected = selectedIndex === i;
@@ -1583,11 +2109,33 @@ export function RouteScreen({
                   >
                     ☕ {dwellMins} min at stops
                   </span>
+                  {activeRoute.estimated_total_cost_usd !== undefined && (
+                    <span
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#e2cc8f]/10 text-[#e2cc8f] text-[11px] font-medium border border-[#e2cc8f]/20"
+                      style={{ fontFamily: "var(--font-inter)" }}
+                    >
+                      💰 {activeRoute.estimated_total_cost_usd === 0 ? "Free" : `$${activeRoute.estimated_total_cost_usd} est. spend`}
+                    </span>
+                  )}
                   <span
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f4f4f5]/8 text-[#f4f4f5]/70 text-[11px] font-medium border border-[#f4f4f5]/15"
                     style={{ fontFamily: "var(--font-inter)" }}
                   >
                     ⏱️ {totalLabel} total
+                  </span>
+                  <span
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/55 text-[11px] font-medium border border-[#f4f4f5]/10"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                    title="Estimated based on walking duration"
+                  >
+                    👣 {Math.round(walkingMins * 120).toLocaleString()} steps
+                  </span>
+                  <span
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/55 text-[11px] font-medium border border-[#f4f4f5]/10"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                    title="Estimated calories burned walking"
+                  >
+                    🔥 {Math.round(walkingMins * 4.5)} kcal
                   </span>
                 </>
               );
@@ -1694,6 +2242,9 @@ export function RouteScreen({
                       isVisited={checkedInStops.has(i)}
                       dwellSeconds={dwellSeconds.get(i) ?? 0}
                       onManualCheckIn={walkModeActive && !checkedInStops.has(i) ? () => manualCheckIn(i, handleCheckIn) : undefined}
+                      vibe={vibe}
+                      onSwapWaypoint={handleSwapWaypoint}
+                      isSwapping={swappingIndex === i}
                     />
                   </div>
 
@@ -1765,11 +2316,9 @@ export function RouteScreen({
             className="mb-8 flex items-center gap-2 flex-wrap justify-center"
           >
             {activeRoute.waypoints.map((wp) => {
-              const href = wp.place_id
+              const href = wp.place_id && !wp.place_id.startsWith("otm:") && !wp.place_id.startsWith("fsq:")
                 ? `https://www.google.com/maps/place/?q=place_id:${wp.place_id}`
-                : (wp.lat != null && wp.lng != null)
-                ? `https://www.google.com/maps/search/?api=1&query=${wp.lat},${wp.lng}`
-                : null;
+                : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(wp.location_name + ", " + (wp.address_hint || ""))}`;
               const badge = (
                 <span
                   className="w-7 h-7 rounded-full bg-[#8ba88e]/15 border border-[#8ba88e]/30 flex items-center justify-center text-[#8ba88e] text-[11px] font-semibold transition-all duration-200"
@@ -1999,6 +2548,28 @@ export function RouteScreen({
                 </motion.button>
               )}
 
+              {/* Detour Me Button */}
+              {!isSharedView && walkModeActive && (
+                <motion.button
+                  id="detour-me-button"
+                  onClick={handleTriggerDetour}
+                  disabled={isFetchingDetour}
+                  whileHover={{ scale: 1.015 }}
+                  whileTap={{ scale: 0.985 }}
+                  transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                  className="shrink-0 py-4 px-4 rounded-2xl bg-[#e5d3b3]/10 border border-[#e5d3b3]/25 text-[#e5d3b3] hover:bg-[#e5d3b3]/20 animate-pulse shadow-[0_0_15px_rgba(229,211,179,0.3)] transition-all flex items-center justify-center gap-2"
+                  style={{ fontFamily: "var(--font-inter)" }}
+                  title="Spontaneous Detour"
+                >
+                  {isFetchingDetour ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-[#e5d3b3]" strokeWidth={1.5} />
+                  ) : (
+                    <Sparkles className="w-4 h-4 text-[#e5d3b3]" strokeWidth={1.5} />
+                  )}
+                  detour me
+                </motion.button>
+              )}
+
               {/* Main CTA */}
               <motion.button
                 id="start-wandering-button"
@@ -2013,6 +2584,25 @@ export function RouteScreen({
                 start wandering
                 <ExternalLink className="w-3.5 h-3.5 opacity-60" strokeWidth={2} />
               </motion.button>
+
+              {isIOS && (
+                <motion.button
+                  onClick={() => {
+                    const startLoc = encodeURIComponent(activeRoute.start_location || activeRoute.waypoints[0]?.location_name || "");
+                    const endLoc = encodeURIComponent(activeRoute.end_location || activeRoute.waypoints[activeRoute.waypoints.length - 1]?.location_name || "");
+                    const appleMapsLink = `https://maps.apple.com/?saddr=${startLoc}&daddr=${endLoc}&dirflg=w`;
+                    window.open(appleMapsLink, "_blank");
+                  }}
+                  whileHover={{ scale: 1.015 }}
+                  whileTap={{ scale: 0.985 }}
+                  transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                  className="px-4 py-4 rounded-2xl bg-[#f4f4f5]/5 border border-[#f4f4f5]/10 text-[#f4f4f5]/70 font-semibold text-[13px] tracking-wide hover:bg-[#f4f4f5]/10 transition-colors"
+                  style={{ fontFamily: "var(--font-inter)" }}
+                  title="Open Apple Maps walking directions"
+                >
+                  apple maps
+                </motion.button>
+              )}
             </div>
 
             <p className="text-center text-[#f4f4f5]/20 text-[11px] mt-2 font-light" style={{ fontFamily: "var(--font-inter)" }}>
@@ -2021,6 +2611,167 @@ export function RouteScreen({
           </div>
         </motion.div>
       )}
+
+      {/* ── Spontaneous Detour Modal ── */}
+      <AnimatePresence>
+        {detourModalOpen && detourWaypoint && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] bg-[#131316]/80 backdrop-blur-md flex items-center justify-center p-5"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              transition={{ type: "spring", stiffness: 350, damping: 30 }}
+              className="w-full max-w-[440px] glass border border-[#e5d3b3]/25 rounded-3xl overflow-hidden shadow-2xl relative"
+            >
+              {/* Close Button */}
+              <button
+                onClick={() => setDetourModalOpen(false)}
+                className="absolute top-4 right-4 z-20 p-2 rounded-full bg-[#131316]/60 text-[#f4f4f5]/60 hover:text-[#f4f4f5] backdrop-blur-sm transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              {/* Detour Header Photo / Gradient */}
+              {detourWaypoint.photo_url && !detourImageError ? (
+                <div className="relative w-full h-44 overflow-hidden bg-[#131316]">
+                  <img
+                    src={detourWaypoint.photo_url}
+                    alt={detourWaypoint.location_name}
+                    className="w-full h-full object-cover"
+                    onError={() => setDetourImageError(true)}
+                  />
+                  <div
+                    className="absolute inset-0"
+                    style={{
+                      background: "linear-gradient(to bottom, transparent 30%, #131316 100%)",
+                    }}
+                  />
+                  <span
+                    className="absolute top-4 left-4 inline-block px-2.5 py-0.5 rounded-full bg-[#131316]/75 backdrop-blur-sm text-[#8ba88e] text-[10px] font-medium tracking-wider uppercase"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                  >
+                    {detourWaypoint.vibe_tag}
+                  </span>
+                  {detourWaypoint.google_rating != null && (
+                    <span
+                      className="absolute top-4 right-14 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#131316]/75 backdrop-blur-sm text-[#e5d3b3] text-[11px] font-medium"
+                      style={{ fontFamily: "var(--font-inter)" }}
+                    >
+                      ★ {detourWaypoint.google_rating.toFixed(1)}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                (() => {
+                  const vs = getVibeStyle(detourWaypoint.vibe_tag || "");
+                  const IconComponent = vs.icon;
+                  return (
+                    <div className={`relative w-full h-44 bg-gradient-to-br ${vs.gradient} flex items-center justify-center overflow-hidden`}>
+                      <IconComponent className={`w-20 h-20 ${vs.iconColor}`} strokeWidth={1} />
+                      <div
+                        className="absolute inset-0"
+                        style={{
+                          background: "linear-gradient(to bottom, transparent 30%, #131316 100%)",
+                        }}
+                      />
+                      <span
+                        className="absolute top-4 left-4 inline-block px-2.5 py-0.5 rounded-full bg-[#131316]/75 backdrop-blur-sm text-[#8ba88e] text-[10px] font-medium tracking-wider uppercase"
+                        style={{ fontFamily: "var(--font-inter)" }}
+                      >
+                        {detourWaypoint.vibe_tag}
+                      </span>
+                      {detourWaypoint.google_rating != null && (
+                        <span
+                          className="absolute top-4 right-14 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#131316]/75 backdrop-blur-sm text-[#e5d3b3] text-[11px] font-medium"
+                          style={{ fontFamily: "var(--font-inter)" }}
+                        >
+                          ★ {detourWaypoint.google_rating.toFixed(1)}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()
+              )}
+
+              {/* Detour Content */}
+              <div className="p-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <Sparkles className="w-4 h-4 text-[#e5d3b3] animate-pulse" />
+                  <span className="text-[11px] tracking-widest font-semibold text-[#e5d3b3]/50 uppercase" style={{ fontFamily: "var(--font-inter)" }}>
+                    Spontaneous Detour
+                  </span>
+                </div>
+
+                <h3
+                  className="text-2xl font-semibold text-[#f4f4f5] leading-tight mb-2"
+                  style={{ fontFamily: "var(--font-playfair)" }}
+                >
+                  {detourWaypoint.location_name}
+                </h3>
+
+                <p
+                  className="text-[#8ba88e] text-[12px] font-medium mb-4 flex items-center gap-1.5"
+                  style={{ fontFamily: "var(--font-inter)" }}
+                >
+                  <MapPin className="w-3.5 h-3.5" />
+                  <span>{detourWaypoint.address_hint}</span>
+                  {detourWalkMins !== null && (
+                    <span className="text-[#f4f4f5]/30 ml-1">
+                      ({detourWalkMins} min walk)
+                    </span>
+                  )}
+                </p>
+
+                <p
+                  className="text-[#f4f4f5]/70 text-[14px] font-light leading-relaxed mb-5"
+                  style={{ fontFamily: "var(--font-inter)" }}
+                >
+                  {detourWaypoint.action_description}
+                </p>
+
+                {/* Insider Tip box */}
+                {detourWaypoint.insider_tip && (
+                  <div className="mb-6 p-4 rounded-2xl bg-[#e5d3b3]/5 border border-[#e5d3b3]/15">
+                    <div className="flex items-center gap-1.5 mb-1 text-[11px] font-semibold text-[#e5d3b3]/60 uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>
+                      <Lightbulb className="w-3.5 h-3.5" />
+                      insider tip
+                    </div>
+                    <p
+                      className="text-[#e5d3b3]/75 text-[13px] font-light leading-relaxed italic"
+                      style={{ fontFamily: "var(--font-playfair)" }}
+                    >
+                      &ldquo;{detourWaypoint.insider_tip}&rdquo;
+                    </p>
+                  </div>
+                )}
+
+                {/* Modal Buttons */}
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => setDetourModalOpen(false)}
+                    className="flex-1 py-3.5 rounded-2xl border border-[#f4f4f5]/10 text-[#f4f4f5]/40 hover:border-[#f4f4f5]/20 hover:text-[#f4f4f5]/60 text-[13px] font-semibold uppercase tracking-wider transition-all duration-200 cursor-pointer"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                  >
+                    Keep Walking
+                  </button>
+                  <button
+                    onClick={handlePivotRoute}
+                    className="flex-1 py-3.5 rounded-2xl bg-[#e5d3b3] text-[#131316] hover:bg-[#ebdcb9] text-[13px] font-semibold uppercase tracking-wider shadow-[0_0_20px_rgba(229,211,179,0.25)] transition-all duration-200 cursor-pointer"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                  >
+                    Pivot Route
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
@@ -2032,6 +2783,8 @@ export default function Home() {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [timeBudget, setTimeBudget] = useState(90);
+  const [inputMode, setInputMode] = useState<"time" | "steps">("time");
+  const [stepGoal, setStepGoal] = useState<number>(5000);
   const [vibe, setVibe] = useState<VibeId | "">("");
   const [customVibe, setCustomVibe] = useState("");
   const [isLocating, setIsLocating] = useState(false);
@@ -2042,15 +2795,15 @@ export default function Home() {
   const [weatherContext, setWeatherContext] = useState<string | null>(null);
   const [numStops, setNumStops] = useState<number>(3);
   const [freeOnly, setFreeOnly] = useState<boolean>(false);
+  const [avoidSlopes, setAvoidSlopes] = useState<boolean>(false);
+  const [maxBudget, setMaxBudget] = useState<number>(50);
   const [advisorData, setAdvisorData] = useState<AdvisorResponse | null>(null);
   const [advisorLoading, setAdvisorLoading] = useState<boolean>(false);
-  const [presets, setPresets] = useState<PresetOption[]>([]);
-  const [presetsLoading, setPresetsLoading] = useState<boolean>(false);
-  const [presetsRefreshing, setPresetsRefreshing] = useState<boolean>(false);
-  const [selectedPresetIdx, setSelectedPresetIdx] = useState<number | null>(null);
   const [companion, setCompanion] = useState<string>("solo");
   const [isRoundTrip, setIsRoundTrip] = useState(false);
   const [comfortMode, setComfortMode] = useState(false);
+
+  const effectiveTimeBudget = inputMode === "steps" ? Math.round(stepGoal / 120) + (numStops * 25) : timeBudget;
 
   // Keep end in sync when round-trip is active and start changes
   useEffect(() => {
@@ -2065,8 +2818,31 @@ export default function Home() {
     // 1. Register service worker
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js")
-        .then((reg) => console.log("SW registered:", reg.scope))
+        .then((reg) => {
+          console.log("SW registered:", reg.scope);
+          // Check for service worker updates
+          reg.addEventListener("updatefound", () => {
+            const newWorker = reg.installing;
+            if (newWorker) {
+              newWorker.addEventListener("statechange", () => {
+                if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+                  console.log("New service worker installed; reloading page to apply update.");
+                  window.location.reload();
+                }
+              });
+            }
+          });
+        })
         .catch((err) => console.error("SW registration failed:", err));
+
+      // Reload page when service worker controller changes
+      let refreshing = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (!refreshing) {
+          refreshing = true;
+          window.location.reload();
+        }
+      });
     }
     
     // 2. Listen for install prompt
@@ -2101,7 +2877,7 @@ export default function Home() {
           body: JSON.stringify({
             start_location: start,
             end_location: end,
-            time_budget_minutes: timeBudget,
+            time_budget_minutes: effectiveTimeBudget,
             num_stops: numStops,
             companion: companion,
             local_time: timeContext,
@@ -2123,9 +2899,9 @@ export default function Home() {
     }, 900);
 
     return () => clearTimeout(timer);
-  // Companion is intentionally excluded: changing companion (e.g. via preset click)
-  // should NOT re-run the distance/feasibility check. Companion is still sent in
-  // the request body via the closure — it just won't act as a trigger.
+  // Companion is intentionally excluded: changing companion should NOT re-run the
+  // distance/feasibility check. Companion is still sent in the request body
+  // via the closure — it just won't act as a trigger.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [start, end]);
 
@@ -2134,60 +2910,22 @@ export default function Home() {
   const clientFeasibility = (() => {
     if (!advisorData) return null;
     const minRequired = numStops * 12;
-    if (timeBudget < minRequired) {
+    if (effectiveTimeBudget < minRequired) {
       return {
         status: "impossible" as const,
-        message: `impossible: ${timeBudget}m is too short for ${numStops} stops — try fewer stops or more time`,
+        message: `impossible: ${inputMode === "steps" ? `${stepGoal.toLocaleString()} steps` : `${effectiveTimeBudget}m`} is too short for ${numStops} stops — try fewer stops or more time`,
       };
     }
-    if (timeBudget < numStops * 18) {
+    if (effectiveTimeBudget < numStops * 18) {
       return {
         status: "tight" as const,
-        message: `tight: ${numStops} stops in ${timeBudget}m is doable but you'll need to keep moving`,
+        message: `tight: ${numStops} stops in ${inputMode === "steps" ? `${stepGoal.toLocaleString()} steps` : `${effectiveTimeBudget}m`} is doable but you'll need to keep moving`,
       };
     }
     return null; // use server message
   })();
 
-  const fetchPresets = useCallback(async (isRefresh = false) => {
-    if (!start.trim()) {
-      setPresets([]);
-      return;
-    }
-    setPresetsLoading(true);
-    try {
-      const localTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const localDay = new Date().toLocaleDateString([], { weekday: 'long' });
-      const timeContext = `${localDay}, ${localTime}`;
 
-      const res = await fetch("/api/suggest-vibe-preset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          start_location: start,
-          local_time: timeContext,
-          refresh: isRefresh,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPresets(data.presets || []);
-      }
-    } catch (err) {
-      console.error("error fetching presets:", err);
-    } finally {
-      setPresetsLoading(false);
-    }
-  }, [start]);
-
-  useEffect(() => {
-    if (!start.trim()) {
-      setPresets([]);
-      return;
-    }
-    const timer = setTimeout(() => fetchPresets(false), 1000);
-    return () => clearTimeout(timer);
-  }, [start, fetchPresets]);
 
   useEffect(() => {
     if (screen !== "loading") return;
@@ -2219,12 +2957,14 @@ export default function Home() {
         body: JSON.stringify({
           start_location: start,
           end_location: end,
-          time_budget_minutes: timeBudget,
+          time_budget_minutes: effectiveTimeBudget,
           vibe: selectedVibe,
           local_time: timeContext,
           num_stops: numStops,
           free_only: freeOnly,
-          companion: companion
+          companion: companion,
+          avoid_slopes: avoidSlopes,
+          max_budget_usd: maxBudget
         }),
       });
 
@@ -2271,10 +3011,8 @@ export default function Home() {
             currentRoutes[data.index] = data.route;
             setRouteData({ routes: currentRoutes });
 
-            // Switch screen to route view immediately when Route 1 is ready!
-            if (data.index === 0) {
-              setScreen("route");
-            }
+            // Switch screen to route view immediately when any route is ready!
+            setScreen("route");
           } else if (data.type === "error") {
             throw new Error(data.detail || "Server error curating routes");
           }
@@ -2289,7 +3027,7 @@ export default function Home() {
       setError(err instanceof Error ? err.message : "Something went wrong");
       setScreen("input");
     }
-  }, [start, end, timeBudget, vibe, customVibe, numStops, freeOnly, companion]);
+  }, [start, end, timeBudget, vibe, customVibe, numStops, freeOnly, companion, avoidSlopes, maxBudget]);
 
   const handleReset = useCallback(() => {
     setRouteData(null);
@@ -2324,8 +3062,9 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-[#131316] text-[#f4f4f5] relative overflow-x-hidden">
+    <main className={`min-h-screen bg-[#131316] text-[#f4f4f5] relative overflow-x-hidden${comfortMode ? ' comfort-mode' : ''}`}>
       <BackgroundOrbs />
+      <ConfettiCanvas active={screen === "route"} />
       <AnimatePresence mode="wait">
         {screen === "input" && (
           <InputScreen
@@ -2333,6 +3072,8 @@ export default function Home() {
             start={start} setStart={setStart}
             end={end} setEnd={setEnd}
             timeBudget={timeBudget} setTimeBudget={setTimeBudget}
+            inputMode={inputMode} setInputMode={setInputMode}
+            stepGoal={stepGoal} setStepGoal={setStepGoal}
             vibe={vibe} setVibe={setVibe}
             onWander={handleWander}
             error={error}
@@ -2345,19 +3086,13 @@ export default function Home() {
             setNumStops={setNumStops}
             freeOnly={freeOnly}
             setFreeOnly={setFreeOnly}
+            avoidSlopes={avoidSlopes}
+            setAvoidSlopes={setAvoidSlopes}
+            maxBudget={maxBudget}
+            setMaxBudget={setMaxBudget}
             advisorData={advisorData}
             advisorLoading={advisorLoading}
             clientFeasibility={clientFeasibility}
-            presets={presets}
-            presetsLoading={presetsLoading}
-            presetsRefreshing={presetsRefreshing}
-            onRefreshPresets={async () => {
-              setPresetsRefreshing(true);
-              await fetchPresets(true);
-              setPresetsRefreshing(false);
-            }}
-            selectedPresetIdx={selectedPresetIdx}
-            setSelectedPresetIdx={setSelectedPresetIdx}
             companion={companion}
             setCompanion={setCompanion}
             setHasManuallySetStops={setHasManuallySetStops}
@@ -2380,6 +3115,8 @@ export default function Home() {
             onReset={handleReset}
             weatherContext={weatherContext}
             addPassportStamp={addStamp}
+            comfortMode={comfortMode}
+            maxBudget={maxBudget}
           />
         )}
       </AnimatePresence>

@@ -147,3 +147,72 @@ input:focus {
   pointer-events: none;
   border-radius: inherit;
 }
+
+/* ── Comfort Mode ──────────────────────────────────────────────────────────────
+   Applied to <main> — everything inside gets larger text, more breathing room.
+   Uses CSS specificity to override Tailwind utility classes.
+   ─────────────────────────────────────────────────────────────────────────── */
+.comfort-mode {
+  font-size: 1.125rem !important; /* 18px base */
+  line-height: 1.7 !important;
+}
+
+/* Body copy and labels */
+.comfort-mode p,
+.comfort-mode span:not(.leaflet-attribution-flag),
+.comfort-mode label,
+.comfort-mode a {
+  font-size: 1.0625rem !important; /* 17px */
+  line-height: 1.65 !important;
+}
+
+/* Small caps / pill text — bump but don't go crazy */
+.comfort-mode [class*="text-[10px]"],
+.comfort-mode [class*="text-[9px]"] {
+  font-size: 13px !important;
+}
+.comfort-mode [class*="text-[11px]"] {
+  font-size: 14px !important;
+}
+.comfort-mode [class*="text-[12px]"] {
+  font-size: 15px !important;
+}
+.comfort-mode [class*="text-[13px]"] {
+  font-size: 17px !important;
+}
+.comfort-mode [class*="text-[14px]"] {
+  font-size: 18px !important;
+}
+
+/* Stop name / headings */
+.comfort-mode h1, .comfort-mode h2, .comfort-mode h3 {
+  font-size: 1.4em !important;
+  line-height: 1.3 !important;
+}
+
+/* Icons — target SVGs (can't easily target Tailwind w-3/w-4 etc.) */
+.comfort-mode svg {
+  min-width: 1.3em;
+  min-height: 1.3em;
+}
+
+/* Buttons & interactive pills */
+.comfort-mode button,
+.comfort-mode [role="button"] {
+  font-size: 1rem !important;
+  padding-top: 0.6em !important;
+  padding-bottom: 0.6em !important;
+  min-height: 44px;
+}
+
+/* Timeline stop cards — more breathing room */
+.comfort-mode .glass {
+  padding: 1.75rem !important;
+}
+
+/* Input rows */
+.comfort-mode input,
+.comfort-mode textarea {
+  font-size: 1.0625rem !important;
+  line-height: 1.6 !important;
+}

@@ -34,10 +34,10 @@ interface WanderMapProps {
 
 // Build a compact place-card popup — no photo, just the essentials + links
 function buildStopPopup(wp: WaypointData): string {
-  const mapsUrl = wp.place_id
+  const mapsUrl = wp.place_id && !wp.place_id.startsWith("otm:") && !wp.place_id.startsWith("fsq:")
     ? `https://www.google.com/maps/place/?q=place_id:${wp.place_id}`
     : wp.lat != null && wp.lng != null
-    ? `https://www.google.com/maps/search/?api=1&query=${wp.lat},${wp.lng}`
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(wp.location_name + ", " + (wp.address_hint || ""))}`
     : null;
 
   const streetViewUrl =
@@ -87,6 +87,13 @@ function buildStopPopup(wp: WaypointData): string {
 export function WanderMap({ route }: WanderMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
+  const boundsRef = useRef<any>(null);
+
+  const handleRefocus = () => {
+    if (mapRef.current && boundsRef.current) {
+      mapRef.current.fitBounds(boundsRef.current, { padding: [48, 48], animate: true });
+    }
+  };
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -211,7 +218,9 @@ export function WanderMap({ route }: WanderMapProps) {
       }
 
       if (coords.length >= 2) {
-        map.fitBounds(L.latLngBounds(coords), { padding: [48, 48] });
+        const bounds = L.latLngBounds(coords);
+        boundsRef.current = bounds;
+        map.fitBounds(bounds, { padding: [48, 48] });
       }
 
       L.control.zoom({ position: "bottomright" }).addTo(map);
@@ -293,6 +302,37 @@ export function WanderMap({ route }: WanderMapProps) {
         }
       `}</style>
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+      {/* Refocus button */}
+      <button
+        onClick={handleRefocus}
+        title="Re-center map"
+        style={{
+          position: "absolute",
+          top: "10px",
+          left: "10px",
+          zIndex: 1000,
+          background: "rgba(24,24,27,0.88)",
+          border: "1px solid rgba(139,168,142,0.3)",
+          color: "#8ba88e",
+          borderRadius: "8px",
+          padding: "5px 10px",
+          fontSize: "11px",
+          fontWeight: 600,
+          letterSpacing: "0.04em",
+          cursor: "pointer",
+          backdropFilter: "blur(8px)",
+          display: "flex",
+          alignItems: "center",
+          gap: "5px",
+          lineHeight: 1,
+        }}
+      >
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+        </svg>
+        re-center
+      </button>
     </>
   );
 }

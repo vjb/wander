@@ -17,17 +17,16 @@ function Crop-Img {
 
 $a = 'c:\Users\vjbel\hacks\wander\assets'
 
-# 01-landing: 2556x1513. Center the full hero+card. Hero starts at ~x=460, card ends ~x=1760
-Crop-Img "$a\screenshot-01-landing.png" "$a\crop-01-landing.png" 460 20 1300 1150
+# Scaled coordinates for 1920x1057 screenshots
 
-# 02-presets: 2556x1777. App card center: card left ~770, right ~1790
-Crop-Img "$a\screenshot-02-presets.png" "$a\crop-02-presets.png" 760 15 1040 1380
+# 01-landing: Center the full hero + card
+Crop-Img "$a\screenshot-01-landing.png" "$a\crop-01-landing.png" 340 15 980 860
 
-# 03-form-filled: same card position, content starts a bit lower
-Crop-Img "$a\screenshot-03-form-filled.png" "$a\crop-03-form-filled.png" 760 200 1040 1200
+# 03-form-filled: Form with custom options and vibe selected
+Crop-Img "$a\screenshot-03-form-filled.png" "$a\crop-03-form-filled.png" 570 150 780 900
 
-# 04-route: content left ~640, right ~1640, full height to 1700
-Crop-Img "$a\screenshot-04-route.png" "$a\crop-04-route.png" 640 0 1000 1680
+# 04-route: Route map + top header
+Crop-Img "$a\screenshot-04-route.png" "$a\crop-04-route.png" 480 0 750 1057
 
-# 05-stops: same crop as 04
-Crop-Img "$a\screenshot-05-stops.png" "$a\crop-05-stops.png" 640 0 1000 1700
+# 05-stops: Timeline stop cards with swap menu open
+Crop-Img "$a\screenshot-05-stops.png" "$a\crop-05-stops.png" 480 0 750 1057

@@ -1,236 +1,118 @@
 # Wander UI
 
-> *Your life isn't a chore; wander.*
-
-The Next.js 16 frontend for **Wander** — generates three distinct, Google-verified walking routes per request, each one tap away from live GPS navigation in Google Maps.
+The Next.js 16 frontend interface for the wander walking route planner. This client application displays generated routes, manages active tracking state, and handles coordinate exports for navigation.
 
 ---
 
-## Stack
+## Technical Stack
 
-| Layer | Technology |
-|---|---|
-| Framework | Next.js 16.2 (App Router, TypeScript) |
-| Styling | Tailwind CSS v4 |
-| Animations | Framer Motion v12 |
-| Fonts | Playfair Display (headings) + Inter (body) |
-| API | FastAPI backend via `/api/*` proxy rewrite |
+* **Framework**: Next.js 16.2 (App Router, TypeScript)
+* **Styling**: Tailwind CSS v4
+* **Animations**: Framer Motion v12
+* **Fonts**: Playfair Display (headings) and Inter (body)
+* **Routing and Proxying**: API requests mapped via Next.js rewrites in `next.config.ts`
 
 ---
 
-## Design System — *Quiet Luxury / Digital Oasis*
+## Design System
 
-A dark, premium, and minimal palette with elegant typography:
+The visual design uses a dark, minimal palette:
 
-| Token | Value | Use |
-|---|---|---|
-| Obsidian | `#131316` | Page background |
-| Surface | `#1E1E24` | Glassmorphism cards |
-| Matcha | `#8BA88E` | Accent, CTAs, active states |
-| Sand | `#E5D3B3` | Ratings, timers, insider tips |
-| Cream | `#F4F4F5` | Body text |
+* **Obsidian (`#131316`)**: Primary page background
+* **Surface (`#1E1E24`)**: Frosted glass container background
+* **Matcha (`#8BA88E`)**: Accent colors, primary actions, and active states
+* **Sand (`#E5D3B3`)**: Ratings, durations, and expanded details
+* **Cream (`#F4F4F5`)**: Standard text copy
 
-Typography: **Playfair Display** (serif, headings) + **Inter** (sans, body).
+---
+
+## Client Application Flow
+
+The following state machine details how the Next.js client transitions between screens and handles data operations:
+
+```mermaid
+graph TD
+    A["Input Screen (Form entry for start, end, vibe)"] -->|Submit Form and Validate| B["Loading Screen (Animation active, SSE stream starts)"]
+    B -->|Stream routes chunked payload| C["Route Screen (Active itinerary rendering)"]
+    C -->|Swap Stop triggered| D["Stop Swapping Overlay (Surprise me vs. custom prompt)"]
+    D -->|POST /api/swap-waypoint| C
+    C -->|Click Share Route| E["Clipboard copy: Formatted text summary + URL"]
+    C -->|iOS client detected| F["Optional Apple Maps Deep Link Handoff"]
+    C -->|Add to Calendar clicked| G["ICS calendar file generated and downloaded"]
+    C -->|Keys 1, 2, 3 pressed| C
+    C -->|Escape pressed during swap| C
+```
+
+---
+
+## Core Interactive Features
+
+### 1. Dual-Input Mode (Time vs. Steps)
+* **Time Budget**: Configures trip duration from 30 minutes to 4 hours in 15-minute steps.
+* **Step Goal**: Sets target steps from 3,000 to 15,000 in increments of 1,000. Steps are converted client-side to walking minutes (using 120 steps per minute) and added to estimated stop dwell times.
+
+### 2. Address Quick-Copy
+* Stop addresses are rendered as copy buttons. Clicking an address writes it to the clipboard and triggers a temporary confirmation badge.
+
+### 3. Formatted Itinerary Share Summary
+* Sharing a route writes a structured plain-text summary containing the route name, sequential stop list, and shared URL directly to the user's clipboard.
+
+### 4. Calorie and Step Expenditure Badges
+* Displays estimated steps and calories burned (using 4.5 kcal per walking minute) in the route metadata header.
+
+### 5. Weather-Aware Placeholders
+* Analyzes geolocated weather forecast advice to update custom vibe text placeholders dynamically (e.g. suggesting cozy indoor markets during precipitation, and park strolls during clear skies).
+
+### 6. Interactive Dwell Duration Progress Meter
+* During GPS Walk Mode, waypoints render a horizontal progress bar tracking elapsed time against that stop's target duration.
+
+### 7. Keyboard Navigation Shortcuts
+* Keys `1`, `2`, and `3` switch route tabs. Pressing `Escape` closes active stop-swapping overlay inputs.
+
+### 8. Custom iOS Native Navigation Selector
+* Renders a secondary "apple maps" button alongside the default Google Maps button on iOS devices, routing walking directions from start to end locations.
+
+### 9. Confetti Particle Canvas
+* Shoots canvas particle bursts from the bottom corners when route generation completes.
+
+### 10. Dynamic Server-Side Share Layout
+* Configures layout metadata in `app/r/[id]/layout.tsx` to query shared route records from the SQLite database server-side, returning Open Graph tags for rich previews.
 
 ---
 
 ## Running Locally
 
-Requires the FastAPI backend running on `localhost:8000`.
+Ensure the FastAPI API backend is running on `localhost:8000`.
 
 ```bash
 npm install
 npm run dev
-# → http://localhost:3000
 ```
 
-All `/api/*` requests are proxied to `http://localhost:8000/api/*` via Next.js rewrites in `next.config.ts`.
+The Next.js development server runs on **http://localhost:3000** and proxies `/api/*` queries to the backend.
 
 ---
 
-## End-to-End Walkthrough
-
-An interactive walkthrough session: *Hell's Kitchen ➔ Flatiron District, 90 min, Green & Scenic.*
-
----
-
-### Screen 1 — Landing
-
-Open [http://localhost:3000](http://localhost:3000). The input form appears over a dark obsidian background with ambient gradient orbs and a subtle dot-grid texture.
-
-![Landing screen — dark background, Playfair Display headline, glassmorphism card](../assets/01-landing.png)
-
-**Design details:**
-- Serif headline: *"Your city has **secrets** to share."* — Playfair Display
-- Glassmorphism card with `backdrop-blur` + `border-white/7`
-- Navigation icon + `WANDER` wordmark in Matcha
-- Vibe selector buttons (Caffeinated & Cultured / Green & Scenic / Spontaneous & Social) + a custom text prompt input
-- Floating "Install App" button in header (available when installable as a PWA)
-
----
-
-### Screen 2 — Form Filled
-
-Enter your start and end points. Select a vibe or type a custom vibe. The button activates.
-
-![Form filled — Hell's Kitchen to Flatiron, Green & Scenic selected, CTA active](../assets/02-form-filled.png)
-
-**Interaction details:**
-- `Starting from…` / `Ending up at…` — transparent text inputs, no border clutter
-- Time budget slider: 30 min ➔ 4 hours in 15-minute steps, Sand-colored value display
-- Vibe card spring-scales on select, glows with vibe-matched color
-- `Generate three routes →` button activates in Soft Matcha green
-
----
-
-### Screen 3 — Loading
-
-Click **Generate three routes**. The app crossfades to the loading state while the RAG pipeline runs (geocode ➔ Places radar ➔ GPT-4o ➔ Directions API).
-
-![Loading screen — map emoji, italic cycling serif text, breathing dots](../assets/03-loading.png)
-
-**What's happening:**
-- 🗺️ emoji drifts on a slow vertical loop
-- Italic Playfair Display text cycles every 2 seconds:
-  *Reading the streets… ➔ Curating three paths… ➔ Consulting the locals…*
-- Pulsing dots with staggered opacity + scale animation
-- Response time: Sequential stream starts loading Route 1 in ~4 seconds.
-
----
-
-### Screen 4 — Three Routes
-
-Routes arrive. The page crossfades to the itinerary view with a staggered card animation.
-
-![Route screen — 3-tab carousel, numbered stops, walk labels, sticky Start Wandering button](../assets/04-route.png)
-
-**Core features visible:**
-- **Route carousel** at the top — Framer Motion `layoutId` pill slides between Route 1 / 2 / 3
-- Each tab shows the route name; active tab highlighted in Matcha
-- **Numbered stop cards** — vibe tag pill, location name, rating badge, address, action description, duration
-- **Walk labels** between stops: *🚶 ~12 min walk* (computed by Google Directions API)
-- **Map Preview** component showing start, stops, end location pins, and a polyline path with directional flow arrows
-- **Sticky "Start Wandering"** button pinned to the bottom with frosted gradient
-
----
-
-### Screen 5 — Carousel Switch
-
-Click Route 2. The Matcha pill slides over, the old timeline fades out, and Route 2's stops stagger in fresh.
-
-![Carousel switched to Route 2 — Cultural Link stops visible](../assets/05-carousel.png)
-
-**Animation:** `AnimatePresence mode="wait"` with `key={selectedIndex}` — full stagger re-runs on every tab change without layout shift.
-
----
-
-### Screen 6 — Insider Tip
-
-Each stop card has a hidden **Insider tip**. Click to expand.
-
-![Insider tip expanded — italic Playfair quote in Sand color](../assets/06-insider-tip.png)
-
-The tip panel expands with an `AnimatePresence` height animation, separated by a Sand-tinted divider.
-
----
-
-### Screen 7 — Start Wandering
-
-Tap **Start Wandering**. The app opens your multi-stop walking tour pre-loaded inside Google Maps.
-
-![Sticky Start Wandering button — frosted gradient footer, Matcha green CTA](../assets/07-sticky-button.png)
-
-The deep link format:
-```
-https://www.google.com/maps/dir/?api=1
-  &origin=Hell%27s+Kitchen%2C+NYC
-  &destination=Flatiron+District%2C+NYC
-  &waypoints=750+11th+Ave...%7C540+W+26th+St...
-  &travelmode=walking
-```
-
----
-
-### Screen 8 — Google Maps Navigation
-
-Google Maps opens with the full walking route rendered — blue dotted line, all stops pinned, total time and distance calculated.
-
-![Google Maps walking route — blue dotted line, 4 stops, 1 hr 9 min / 3.0 miles](../assets/08-google-maps.png)
-
-- Blue walking route tracing from start to end location
-- All waypoints pinned on the map
-- Tap the blue **Start** button in Google Maps for turn-by-turn GPS navigation
-
----
-
-## API Response Shape
-
-The frontend consumes the following JSON structure from the backend:
-
-```json
-{
-  "routes": [
-    {
-      "route_name": "The Parkway Stroll",
-      "theme_summary": "Ultra-scenic waterfront arc with maximum green space.",
-      "total_walking_time_mins": 112,
-      "navigation_deep_link": "https://www.google.com/maps/dir/?api=1&...",
-      "start_location": "Hell's Kitchen, NYC",
-      "end_location": "Flatiron District, NYC",
-      "start_lat": 40.7637,
-      "start_lng": -73.9918,
-      "end_lat": 40.7400,
-      "end_lng": -73.9903,
-      "waypoints": [
-        {
-          "order": 1,
-          "location_name": "Hudson River Park",
-          "address_hint": "Pier 84, New York, NY",
-          "google_rating": 4.6,
-          "action_description": "Start your journey at the edge of Manhattan...",
-          "duration_mins": 20,
-          "walk_to_next_mins": 12,
-          "vibe_tag": "Waterfront Walk",
-          "insider_tip": "Grab a seat at the end of the pier..."
-        }
-      ]
-    }
-  ]
-}
-```
-
----
-
-## File Structure
+## File Directory Structure
 
 ```
 wander-ui/
 ├── app/
 │   ├── components/
-│   │   └── MapPreview.tsx   # Google Maps component using @vis.gl/react-google-maps
+│   │   ├── MapPreview.tsx     # Google Maps view utilizing leaflet or vis.gl
+│   │   └── RotatingTagline.tsx# Inputs screen header text transitions
+│   ├── hooks/
+│   │   ├── useWalkMode.ts     # Live GPS tracking and proximity checks
+│   │   └── usePassport.ts     # Neighborhood passport local storage logs
 │   ├── r/[id]/
-│   │   └── page.tsx         # Shared route viewer
-│   ├── globals.css          # Tailwind gradients & custom animations
-│   ├── layout.tsx           # Playfair Display & Inter font configurations
-│   └── page.tsx             # Interactive application layout
+│   │   ├── layout.tsx         # Server-side Open Graph metadata generator
+│   │   └── page.tsx           # Shared route viewer client page
+│   ├── globals.css            # Gradients and custom animations
+│   ├── layout.tsx             # Playfair Display and Inter configurations
+│   └── page.tsx               # Main application inputs, logic, and timeline view
 ├── public/
-│   ├── manifest.json        # PWA configuration
-│   └── sw.js                # PWA Service Worker caching
-├── next.config.ts           # API rewrite proxy
+│   ├── manifest.json          # PWA configuration
+│   └── sw.js                  # PWA caching service worker
+├── next.config.ts             # API rewrite configurations
 └── package.json
 ```
-
----
-
-## Screen Reference
-
-| File | Screen | Key Feature |
-|---|---|---|
-| `assets/01-landing.png` | Input form | Glassmorphism card, ambient orbs |
-| `assets/02-form-filled.png` | Form filled | Vibe selection spring animation |
-| `assets/03-loading.png` | Loading state | Cycling serif text, breathing dots |
-| `assets/04-route.png` | Route result | 3-tab carousel, map polyline, stop cards |
-| `assets/05-carousel.png` | Tab switched | Timeline re-animations on tab click |
-| `assets/06-insider-tip.png` | Tip expanded | Smooth height expansion, italic text |
-| `assets/07-sticky-button.png` | Start Wandering | Sticky frosted footer, Google Maps deep-link |
-| `assets/08-google-maps.png` | Google Maps open | Walking path loaded in native maps |

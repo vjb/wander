@@ -11,12 +11,16 @@ Architecture:
 
 import asyncio
 import json
+import logging
+import math
 import os
 from typing import Dict, List, Optional
 from urllib.parse import quote_plus
 
 import httpx
 from dotenv import load_dotenv
+
+logger = logging.getLogger("uvicorn.error")
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -24,6 +28,7 @@ from openai import OpenAI
 from pydantic import BaseModel, Field
 
 import database
+import polyline
 
 
 load_dotenv()
@@ -31,8 +36,10 @@ load_dotenv()
 # ── Keys ──────────────────────────────────────────────────────────────────────
 OPENAI_KEY  = os.getenv("OPENAI_API_KEY", "")
 GOOGLE_KEY  = os.getenv("GOOGLE_MAPS_API_KEY", "")
-TAVILY_KEY  = os.getenv("TAVILY_API_KEY", "")
 OPENWEATHER_KEY = os.getenv("OPENWEATHER_API_KEY", "")
+FOURSQUARE_KEY = os.getenv("FOURSQUARE_API_KEY", "")
+OPENTRIPMAP_KEY = os.getenv("OPENTRIPMAP_API_KEY", "")
+
 
 # ── LangSmith ─────────────────────────────────────────────────────────────────
 try:
@@ -90,6 +97,21 @@ VIBE_QUERIES: Dict[str, List[str]] = {
         "scenic overlook waterfront",
         "bakery local pastry",
     ],
+    "Off the Grid": [
+        "secret garden community",
+        "abandoned historic landmark scenic",
+        "vintage thrift clothing bookstore",
+        "indie zine shop record",
+        "local pocket park hidden",
+        "micro-bakery alleyway cafe",
+    ],
+    "Feeling Lucky": [
+        "speakeasy hidden bar",
+        "architectural folly landmark",
+        "unusual oddities museum curio",
+        "esoteric occult bookstore library",
+        "community garden art installation",
+    ],
 }
 
 # ── Vibe → Route Archetypes (Fix #9) ─────────────────────────────────────────
@@ -113,6 +135,16 @@ VIBE_ROUTE_ARCHETYPES: Dict[str, List[tuple]] = {
         ("the decompression loop", "a quiet, short route through pocket parks, a slow coffee, and fresh air"),
         ("the mindful stroll", "a gentle wander through serene green spaces and a calm neighborhood cafe"),
         ("the reset walk", "a focused micro-route: one good coffee, one quiet park bench, one breath of city air"),
+    ],
+    "Off the Grid": [
+        ("the secret city", "a route that consciously avoids tourists, chains, and main streets to show you local secrets"),
+        ("the quiet corner", "a slow path built around hidden community gardens, quiet pocket parks, and micro-cafes"),
+        ("the vintage crawl", "a route connecting retro thrift stores, old book nooks, and cozy, off-beat coffee spots"),
+    ],
+    "Feeling Lucky": [
+        ("the serendipity drift", "a completely unpredictable walk where we trust the algorithm to take us somewhere unexpected"),
+        ("the avant-garde stroll", "a theme that blends art, oddities, and unique local history into a strange but perfect afternoon"),
+        ("the curiosity loop", "a path designed to spark your curiosity with places that don't fit into any standard category"),
     ],
 }
 
@@ -139,6 +171,7 @@ class WaypointV3(BaseModel):
     walk_to_next_mins: int = 0
     vibe_tag: str
     insider_tip: str
+    estimated_cost_usd: Optional[int] = 0
 
 
 class WanderRouteOptionV3(BaseModel):
@@ -154,6 +187,7 @@ class WanderRouteOptionV3(BaseModel):
     end_lng: Optional[float] = None
     waypoints: List[WaypointV3]
     navigation_deep_link: str
+    estimated_total_cost_usd: Optional[int] = 0
 
 
 
@@ -171,6 +205,8 @@ class RouteRequest(BaseModel):
     num_stops: Optional[int] = 3
     free_only: Optional[bool] = False
     companion: Optional[str] = "solo"
+    avoid_slopes: Optional[bool] = False
+    max_budget_usd: Optional[int] = 50
 
 
 class AdvisorRequest(BaseModel):
@@ -192,24 +228,6 @@ class AdvisorResponse(BaseModel):
     weather_advice: Optional[str] = None
 
 
-class PresetOption(BaseModel):
-    title: str
-    vibe: str
-    time_budget: int
-    num_stops: int
-    free_only: bool
-    companion: str
-    reason: str
-
-
-class PresetRequest(BaseModel):
-    start_location: str
-    local_time: Optional[str] = None
-    refresh: bool = False
-
-
-class PresetsResponse(BaseModel):
-    presets: List[PresetOption]
 
 
 class ShareRequest(BaseModel):
@@ -246,6 +264,10 @@ class SelectedWaypointLLM(BaseModel):
         ...,
         description="One specific local secret: the best seat, off-menu item, or perfect time of day to visit",
     )
+    estimated_cost_usd: int = Field(
+        ...,
+        description="Estimated cost in USD per person for this stop. Use 0 for free stops (parks, landmarks, free libraries). Use realistic values: coffee $5, wine/cocktail $15-$20, meal $20-$40.",
+    )
 
 
 class RouteOptionLLM(BaseModel):
@@ -259,6 +281,10 @@ class RouteOptionLLM(BaseModel):
         min_length=2,
         max_length=5,
         description="2–5 stops selected from the verified venue list, in geographic order",
+    )
+    estimated_total_cost_usd: int = Field(
+        ...,
+        description="The sum of estimated_cost_usd for all waypoints in this route.",
     )
 
 
@@ -339,6 +365,44 @@ async def _extract_custom_queries(vibe: str) -> List[str]:
         return [vibe]
 
 
+async def _extract_lucky_queries() -> List[str]:
+    """Generate a surprising, themed, and avant-garde set of Google Maps search queries for 'Feeling Lucky'."""
+    try:
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an urban exploration planner. The user clicked 'I'm Feeling Lucky'. "
+                            "Create a cohesive but completely unexpected, quirky, and themed set of 3 to 5 Google Maps search queries. "
+                            "Think of strange but delightful themes: a retro neon crawl, a botanical & vintage book drift, "
+                            "a speakeasy & historic mystery walk, or a vinyl record & coffee alleyway stroll. "
+                            "Be creative and specific with the search queries (e.g. 'independent bookstore', 'retro arcade bar', 'historic fountain overlook'). "
+                            "Return ONLY a JSON object containing a 'queries' array of strings. Example: {'queries': ['query1', 'query2', 'query3']}."
+                        )
+                    },
+                    {"role": "user", "content": "Generate a completely unique and surprising walk vibe theme and queries."}
+                ],
+                response_format={"type": "json_object"},
+                temperature=1.0
+            )
+        )
+        content = response.choices[0].message.content
+        if content:
+            data = json.loads(content)
+            queries = data.get("queries")
+            if isinstance(queries, list):
+                return [str(q) for q in queries]
+        return ["speakeasy hidden bar", "vintage curio shop", "secret garden"]
+    except Exception as e:
+        print(f"Error generating lucky queries: {e}")
+        return ["speakeasy hidden bar", "vintage curio shop", "secret garden"]
+
+
 # ── Google Geocoding API ──────────────────────────────────────────────────────
 
 
@@ -380,7 +444,172 @@ def _coordinate_distance_m(a: Dict[str, float], b: Dict[str, float]) -> float:
     return R * c
 
 
+# ── Foursquare Places API (New V3) ────────────────────────────────────────────
+
+async def _foursquare_places_search(query: str, lat: float, lng: float, radius_m: float = 2000.0) -> List[Dict]:
+    """Search Foursquare Places API (places-api.foursquare.com) for candidates."""
+    if not FOURSQUARE_KEY:
+        return []
+    try:
+        url = "https://places-api.foursquare.com/places/search"
+        headers = {
+            "accept": "application/json",
+            "X-Places-Api-Version": "2025-06-17",
+            "Authorization": f"Bearer {FOURSQUARE_KEY}"
+        }
+        params = {
+            "ll": f"{lat},{lng}",
+            "radius": int(radius_m),
+            "query": query,
+            "limit": 5,
+            "fields": "fsq_id,name,location,rating,categories,geocodes,photos,price"
+        }
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            res = await client.get(url, headers=headers, params=params)
+            if res.status_code != 200:
+                print(f"[FOURSQUARE ERROR] status={res.status_code}, response={res.text}")
+                return []
+            places = []
+            for p in res.json().get("results", []):
+                # Photo URL mapping
+                photo_url = None
+                photos = p.get("photos", [])
+                if photos:
+                    prefix = photos[0].get("prefix", "")
+                    suffix = photos[0].get("suffix", "")
+                    if prefix and suffix:
+                        photo_url = f"{prefix}800x500{suffix}"
+                
+                # Rating mapping (10.0 max scaled to 5.0)
+                rating = None
+                fsq_rating = p.get("rating")
+                if fsq_rating is not None:
+                    rating = round(fsq_rating / 2.0, 1)
+
+                # Price level mapping
+                fsq_price = p.get("price")
+                price_level = None
+                if fsq_price == 1:
+                    price_level = "PRICE_LEVEL_CHEAP"
+                elif fsq_price == 2:
+                    price_level = "PRICE_LEVEL_MODERATE"
+                elif fsq_price == 3:
+                    price_level = "PRICE_LEVEL_EXPENSIVE"
+                elif fsq_price == 4:
+                    price_level = "PRICE_LEVEL_VERY_EXPENSIVE"
+
+                places.append({
+                    "place_id": f"fsq:{p.get('fsq_id', '')}",
+                    "name": p.get("name", ""),
+                    "address": p.get("location", {}).get("formatted_address", ""),
+                    "rating": rating,
+                    "types": [cat.get("name").lower() for cat in p.get("categories", [])][:3],
+                    "lat": p.get("geocodes", {}).get("main", {}).get("latitude"),
+                    "lng": p.get("geocodes", {}).get("main", {}).get("longitude"),
+                    "photo_url": photo_url,
+                    "price_level": price_level,
+                })
+            return places
+    except Exception as e:
+        print(f"[FOURSQUARE EXCEPTION] query={query}, error={e}")
+        return []
+
+async def _foursquare_get_details(fsq_id: str) -> Dict:
+    """Fetch detailed info (website, top review tips) for a Foursquare place."""
+    if not FOURSQUARE_KEY:
+        return {}
+    try:
+        url = f"https://places-api.foursquare.com/places/{fsq_id}"
+        headers = {
+            "accept": "application/json",
+            "X-Places-Api-Version": "2025-06-17",
+            "Authorization": f"Bearer {FOURSQUARE_KEY}"
+        }
+        params = {"fields": "fsq_id,name,location,rating,photos,price,website,tips,hours"}
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            res = await client.get(url, headers=headers, params=params)
+            if res.status_code == 200:
+                return res.json()
+    except Exception as e:
+        print(f"[FOURSQUARE DETAILS ERROR] id={fsq_id}, error={e}")
+    return {}
+
+
+# ── OpenTripMap API ───────────────────────────────────────────────────────────
+
+async def _opentripmap_places_search(lat: float, lng: float, radius_m: float = 2000.0) -> List[Dict]:
+    """Search OpenTripMap API for cultural/scenic landmarks."""
+    if not OPENTRIPMAP_KEY:
+        return []
+    try:
+        # OpenTripMap radius endpoint expects: radius (m), lon, lat
+        url = "https://api.opentripmap.com/0.1/en/places/radius"
+        params = {
+            "radius": int(radius_m),
+            "lon": lng,
+            "lat": lat,
+            "apikey": OPENTRIPMAP_KEY,
+            "limit": 10,
+        }
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            res = await client.get(url, params=params)
+            if res.status_code != 200:
+                print(f"[OPENTRIPMAP ERROR] status={res.status_code}, response={res.text}")
+                return []
+            places = []
+            features = res.json().get("features", [])
+            for f in features:
+                props = f.get("properties", {})
+                geom = f.get("geometry", {})
+                coords = geom.get("coordinates", [None, None])
+                
+                name = props.get("name", "").strip()
+                if not name:
+                    continue
+
+                rate = props.get("rate", 1)
+                rating = 4.0
+                if rate >= 3:
+                    rating = 4.8
+                elif rate == 2:
+                    rating = 4.4
+                elif rate == 1:
+                    rating = 4.0
+
+                places.append({
+                    "place_id": f"otm:{props.get('xid', '')}",
+                    "name": name,
+                    "address": f"near {name}",
+                    "rating": rating,
+                    "types": [k.strip().lower() for k in props.get("kinds", "").split(",")][:3],
+                    "lat": coords[1],
+                    "lng": coords[0],
+                    "photo_url": None,
+                    "price_level": "PRICE_LEVEL_FREE",
+                })
+            return places
+    except Exception as e:
+        print(f"[OPENTRIPMAP EXCEPTION] error={e}")
+        return []
+
+async def _opentripmap_get_details(xid: str) -> Dict:
+    """Fetch detailed Wikipedia description and image for an OpenTripMap place."""
+    if not OPENTRIPMAP_KEY:
+        return {}
+    try:
+        url = f"https://api.opentripmap.com/0.1/en/places/xid/{xid}"
+        params = {"apikey": OPENTRIPMAP_KEY}
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            res = await client.get(url, params=params)
+            if res.status_code == 200:
+                return res.json()
+    except Exception as e:
+        print(f"[OPENTRIPMAP DETAILS ERROR] id={xid}, error={e}")
+    return {}
+
+
 # ── Google Places API (New) ───────────────────────────────────────────────────
+
 
 async def _places_search_text(query: str, lat: float, lng: float, radius_m: float = 2000.0) -> List[Dict]:
     """Single Places API (New) searchText call — strict radius via locationRestriction."""
@@ -419,6 +648,14 @@ async def _places_search_text(query: str, lat: float, lng: float, radius_m: floa
                     ),
                 },
             )
+            if res.status_code != 200:
+                err_text = res.text
+                try:
+                    err_json = res.json()
+                    err_msg = err_json.get("error", {}).get("message", err_text)
+                except Exception:
+                    err_msg = err_text
+                raise Exception(f"Google Places API error ({res.status_code}): {err_msg}")
             places = []
             for p in res.json().get("places", []):
                 # Build photo URL from first photo reference if available
@@ -445,8 +682,9 @@ async def _places_search_text(query: str, lat: float, lng: float, radius_m: floa
                     }
                 )
             return places
-    except Exception:
-        return []
+    except Exception as e:
+        print(f"[PLACES EXCEPTION] query={query}, error={e}")
+        raise e
 
 
 async def fetch_candidate_venues(start_ll: Dict, end_ll: Optional[Dict], vibe: str, time_budget_minutes: int = 90) -> List[Dict]:
@@ -499,18 +737,23 @@ async def fetch_candidate_venues(start_ll: Dict, end_ll: Optional[Dict], vibe: s
     return venues[:20]
 
 
-# ── Google Directions API ─────────────────────────────────────────────────────
+# ── Google Directions & Elevation API ──────────────────────────────────────────
 
-async def get_walking_times(addresses: List[str]) -> List[int]:
+async def get_route_legs_info(addresses: List[str]) -> List[Dict]:
     """
     Call Directions API between each consecutive pair of addresses in parallel.
-    Returns a list of walk_mins per stop (last stop is always 0).
-    Falls back to 8 min per leg on any error.
+    Returns a list of dicts, one for each leg:
+    {
+      "duration_mins": int,
+      "distance_m": int,
+      "polyline": str
+    }
+    For N addresses, returns N-1 leg dicts.
     """
     if len(addresses) < 2:
-        return [0] * len(addresses)
+        return []
 
-    async def _fetch_leg(client: httpx.AsyncClient, origin: str, destination: str) -> int:
+    async def _fetch_leg(client: httpx.AsyncClient, origin: str, destination: str) -> Dict:
         try:
             res = await client.get(
                 "https://maps.googleapis.com/maps/api/directions/json",
@@ -523,11 +766,27 @@ async def get_walking_times(addresses: List[str]) -> List[int]:
             )
             data = res.json()
             if data.get("status") == "OK":
-                secs = data["routes"][0]["legs"][0]["duration"]["value"]
-                return round(secs / 60)
-            return 8
+                route = data["routes"][0]
+                leg = route["legs"][0]
+                secs = leg["duration"]["value"]
+                dist = leg["distance"]["value"]
+                poly = route.get("overview_polyline", {}).get("points", "")
+                return {
+                    "duration_mins": round(secs / 60),
+                    "distance_m": dist,
+                    "polyline": poly
+                }
+            return {
+                "duration_mins": 8,
+                "distance_m": 600,
+                "polyline": ""
+            }
         except Exception:
-            return 8
+            return {
+                "duration_mins": 8,
+                "distance_m": 600,
+                "polyline": ""
+            }
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         tasks = [
@@ -536,12 +795,70 @@ async def get_walking_times(addresses: List[str]) -> List[int]:
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    walk_times: List[int] = [
-        r if isinstance(r, int) else 8
-        for r in results
-    ]
-    walk_times.append(0)  # last stop never walks to a next stop
+    legs: List[Dict] = []
+    for r in results:
+        if isinstance(r, dict):
+            legs.append(r)
+        else:
+            legs.append({
+                "duration_mins": 8,
+                "distance_m": 600,
+                "polyline": ""
+            })
+    return legs
+
+
+async def get_walking_times(addresses: List[str]) -> List[int]:
+    """
+    Call Directions API and return duration_mins list (last stop is always 0).
+    """
+    legs = await get_route_legs_info(addresses)
+    walk_times = [leg["duration_mins"] for leg in legs]
+    walk_times.append(0)
     return walk_times
+
+
+async def check_leg_incline_steep(client: httpx.AsyncClient, polyline: str, distance_m: float) -> bool:
+    """
+    Sample 10 points along the path using Google Elevation API and calculate slope.
+    Returns True if any consecutive slope exceeds 8% (0.08).
+    """
+    if not polyline or distance_m <= 0:
+        return False
+    try:
+        res = await client.get(
+            "https://maps.googleapis.com/maps/api/elevation/json",
+            params={
+                "path": f"enc:{polyline}",
+                "samples": "10",
+                "key": GOOGLE_KEY,
+            },
+        )
+        data = res.json()
+        if data.get("status") == "OK":
+            results = data.get("results", [])
+            if len(results) >= 2:
+                # distance between consecutive samples
+                # Since we asked for 10 samples, there are 9 intervals
+                d = distance_m / (len(results) - 1)
+                if d <= 0:
+                    return False
+                for i in range(len(results) - 1):
+                    el1 = results[i]["elevation"]
+                    el2 = results[i + 1]["elevation"]
+                    slope = abs(el2 - el1) / d
+                    if slope > 0.08:
+                        logger.warning(
+                            f"Steep leg detected: slope={slope:.4f} (> 0.08) "
+                            f"over interval={d:.1f}m (elevations: {el1:.1f}m to {el2:.1f}m)"
+                        )
+                        return True
+        else:
+            logger.warning(f"Elevation API error status: {data.get('status')}")
+    except Exception as e:
+        logger.error(f"Failed to check leg incline: {e}")
+    return False
+
 
 
 # ── Deep-link builder ─────────────────────────────────────────────────────────
@@ -563,10 +880,23 @@ def build_maps_deep_link(
         f"&waypoints={wp_str}"
         f"&travelmode=walking"
     )
-    if waypoint_place_ids:
-        pids_str = "|".join(quote_plus(pid.strip()) for pid in waypoint_place_ids if pid and pid.strip())
-        if pids_str:
-            url += f"&waypoint_place_ids={pids_str}"
+    if waypoint_place_ids and len(waypoint_place_ids) == len(waypoints):
+        has_all_valid = True
+        valid_pids = []
+        for pid in waypoint_place_ids:
+            if not pid or not isinstance(pid, str):
+                has_all_valid = False
+                break
+            pid_stripped = pid.strip()
+            if not pid_stripped or pid_stripped.startswith("otm:") or pid_stripped.startswith("fsq:"):
+                has_all_valid = False
+                break
+            valid_pids.append(pid_stripped)
+            
+        if has_all_valid:
+            pids_str = "|".join(quote_plus(pid) for pid in valid_pids)
+            if pids_str:
+                url += f"&waypoint_place_ids={pids_str}"
     return url
 
 
@@ -669,6 +999,22 @@ def _call_openai_single_route_sync(
             "public parks, free museums on free-entry days, public plazas, public libraries, or stated free attractions.\n"
         )
 
+    budget_prompt_chunk = ""
+    if request.max_budget_usd is not None:
+        budget_limit = request.max_budget_usd
+        if budget_limit >= 150:
+            budget_prompt_chunk = (
+                "BUDGET CONSTRAINT: The user has set an UNLIMITED budget. Feel free to suggest premium venues "
+                "or high-end spots if appropriate for the vibe, but keep estimations realistic.\n"
+            )
+        else:
+            budget_prompt_chunk = (
+                f"BUDGET CONSTRAINT: The user has set a MAXIMUM budget of ${budget_limit} USD per person for the entire route.\n"
+                f"You MUST select stops such that the sum of estimated_cost_usd for all stops does NOT exceed ${budget_limit} USD.\n"
+                "To stay within budget, curate a mix of free stops (parks, galleries, free landmarks) and paid stops. "
+                "Do NOT recommend high-end/expensive venues if the budget is low. Be extremely conscious of cost allocation.\n"
+            )
+
     system_prompt = f"""You are wander — an urban experience curator with encyclopedic local knowledge.
 Your life isn't a chore; wander. Help the user feel that.
 
@@ -707,6 +1053,7 @@ For reference, remaining time after walking ≈ {_per_stop_mins * _stops} min to
 {companion_prompt_chunk}
 {exclude_prompt_chunk}
 {free_prompt_chunk}
+{budget_prompt_chunk}
 
 STRICT RULES:
 1. Use ONLY venues from the list. Reference each by its [number] in venue_index. No invented stops.
@@ -730,6 +1077,10 @@ Active vibe / custom request: {request.vibe}"""
             min_length=_stops,
             max_length=_stops,
             description=f"Exactly {_stops} stops selected from the verified venue list, in geographic order",
+        )
+        estimated_total_cost_usd: int = Field(
+            ...,
+            description="The sum of estimated_cost_usd for all waypoints in this route.",
         )
 
     response = openai_client.beta.chat.completions.parse(
@@ -761,6 +1112,31 @@ async def _enrich_route(
     end_ll: Dict
 ) -> WanderRouteOptionV3:
     """Enrich LLM selected stops with Google Places details, geocodes, and walking times."""
+    # Fetch details in parallel for Foursquare and OpenTripMap waypoints
+    details_tasks = []
+    wp_indices_to_enrich = []
+    for i, wp in enumerate(raw_route.waypoints):
+        idx = wp.venue_index - 1
+        venue = venues[idx] if (0 <= idx < len(venues)) else None
+        if venue:
+            pid = venue.get("place_id", "")
+            if pid.startswith("fsq:"):
+                fsq_id = pid.split(":", 1)[1]
+                details_tasks.append(_foursquare_get_details(fsq_id))
+                wp_indices_to_enrich.append((i, "fsq"))
+            elif pid.startswith("otm:"):
+                xid = pid.split(":", 1)[1]
+                details_tasks.append(_opentripmap_get_details(xid))
+                wp_indices_to_enrich.append((i, "otm"))
+
+    details_results = await asyncio.gather(*details_tasks, return_exceptions=True)
+    
+    enriched_data = {}
+    for (wp_idx, provider), res in zip(wp_indices_to_enrich, details_results):
+        if isinstance(res, Exception) or not res:
+            continue
+        enriched_data[wp_idx] = (provider, res)
+
     waypoints: List[WaypointV3] = []
     addresses: List[str] = []
 
@@ -768,13 +1144,45 @@ async def _enrich_route(
         idx = wp.venue_index - 1
         venue = venues[idx] if (0 <= idx < len(venues)) else None
 
-        name     = venue["name"].lower().rstrip('.') if venue else f"stop {i + 1}"
+        name     = venue["name"].strip().rstrip('.') if venue else f"stop {i + 1}"
         address  = venue["address"]   if venue else request.start_location
         rating   = venue.get("rating")    if venue else None
         photo_url = venue.get("photo_url") if venue else None
         place_id = venue.get("place_id")  if venue else None
         lat      = venue.get("lat")       if venue else None
         lng      = venue.get("lng")       if venue else None
+        insider_tip = wp.insider_tip.strip().rstrip('.')
+
+        # Apply enriched details
+        if i in enriched_data:
+            provider, data = enriched_data[i]
+            if provider == "fsq":
+                tips = data.get("tips", [])
+                if tips:
+                    tip_text = tips[0].get("text", "")
+                    if tip_text:
+                        insider_tip = f"{insider_tip} (local tip: \"{tip_text.rstrip('.')}\")"
+                photos = data.get("photos", [])
+                if photos and not photo_url:
+                    prefix = photos[0].get("prefix", "")
+                    suffix = photos[0].get("suffix", "")
+                    if prefix and suffix:
+                        photo_url = f"{prefix}800x500{suffix}"
+            elif provider == "otm":
+                wiki = data.get("wikipedia_extracts", {}).get("text", "")
+                if wiki:
+                    insider_tip = f"{insider_tip} (about: {wiki[:220].rstrip('.') if len(wiki) > 220 else wiki.rstrip('.')})"
+                addr_info = data.get("address", {})
+                if addr_info:
+                    road = addr_info.get("road", "")
+                    house = addr_info.get("house_number", "")
+                    suburb = addr_info.get("suburb", "")
+                    constructed_addr = f"{house} {road}, {suburb}".strip(", ")
+                    if constructed_addr:
+                        address = constructed_addr
+                preview = data.get("preview", {})
+                if preview:
+                    photo_url = preview.get("source") or photo_url
 
         addresses.append(address)
         waypoints.append(
@@ -787,11 +1195,12 @@ async def _enrich_route(
                 place_id=place_id,
                 lat=lat,
                 lng=lng,
-                action_description=wp.action_description.lower().rstrip('.'),
+                action_description=wp.action_description.strip().rstrip('.'),
                 duration_mins=wp.duration_mins,
                 walk_to_next_mins=0,  # filled below
-                vibe_tag=wp.vibe_tag.lower().rstrip('.'),
-                insider_tip=wp.insider_tip.lower().rstrip('.'),
+                vibe_tag=wp.vibe_tag.strip().rstrip('.'),
+                insider_tip=insider_tip,
+                estimated_cost_usd=wp.estimated_cost_usd,
             )
         )
 
@@ -813,11 +1222,25 @@ async def _enrich_route(
     else:
         directions_locations.append(request.end_location)
 
-    walk_times = await get_walking_times(directions_locations)
+    legs_info = await get_route_legs_info(directions_locations)
     
-    initial_walk_mins = walk_times[0] if walk_times else 0
+    initial_walk_mins = legs_info[0]["duration_mins"] if legs_info else 0
     for i, wp_obj in enumerate(waypoints):
-        wp_obj.walk_to_next_mins = walk_times[i + 1] if i + 1 < len(walk_times) else 0
+        wp_obj.walk_to_next_mins = legs_info[i + 1]["duration_mins"] if i + 1 < len(legs_info) else 0
+
+    # If avoid_slopes is requested, check the elevation profile of all legs in parallel
+    if request.avoid_slopes:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            slope_tasks = [
+                check_leg_incline_steep(client, leg["polyline"], leg["distance_m"])
+                for leg in legs_info
+            ]
+            slope_results = await asyncio.gather(*slope_tasks, return_exceptions=True)
+        
+        for slope_res in slope_results:
+            if isinstance(slope_res, bool) and slope_res:
+                logger.warning(f"Slope reject: route '{raw_route.route_name}' discarded because it contains a steep leg (> 8% slope)")
+                raise ValueError("Route contains a leg with a steep incline (> 8% slope).")
 
     walking_only_mins = sum(w.walk_to_next_mins for w in waypoints) + initial_walk_mins
     total_time = sum(w.duration_mins + w.walk_to_next_mins for w in waypoints) + initial_walk_mins
@@ -838,9 +1261,11 @@ async def _enrich_route(
             f"(ratio {walk_ratio:.2f})"
         )
 
+    estimated_total_cost_usd = sum(w.estimated_cost_usd or 0 for w in waypoints)
+
     return WanderRouteOptionV3(
-        route_name=raw_route.route_name.lower().rstrip('.'),
-        theme_summary=raw_route.theme_summary.lower().rstrip('.'),
+        route_name=raw_route.route_name.strip().rstrip('.'),
+        theme_summary=raw_route.theme_summary.strip().rstrip('.'),
         total_walking_time_mins=total_time,
         initial_walk_mins=initial_walk_mins,
         start_location=request.start_location,
@@ -854,8 +1279,9 @@ async def _enrich_route(
             f"{start_ll['lat']},{start_ll['lng']}" if start_ll else request.start_location,
             f"{end_ll['lat']},{end_ll['lng']}" if end_ll else request.end_location,
             [f"{w.lat},{w.lng}" if (w.lat is not None and w.lng is not None) else w.address_hint for w in waypoints],
-            [w.place_id for w in waypoints if w.place_id],
+            [w.place_id for w in waypoints],
         ),
+        estimated_total_cost_usd=estimated_total_cost_usd,
     )
 
 
@@ -869,7 +1295,6 @@ def root():
         "version": "3.0.0",
         "langsmith": _LANGSMITH,
         "google": bool(GOOGLE_KEY),
-        "tavily": bool(TAVILY_KEY),
         "tagline": "Your life isn't a chore; wander.",
     }
 
@@ -893,12 +1318,13 @@ async def generate_route(request: RouteRequest):
             end_ll = None
             if GOOGLE_KEY:
                 start_ll = await geocode_location(request.start_location)
+                if not start_ll:
+                    raise Exception(f"could not pinpoint starting location: '{request.start_location}'")
                 end_ll   = await geocode_location(request.end_location)
-            
-            if not start_ll:
-                start_ll = {"lat": 40.7580, "lng": -73.9855}
-            if not end_ll:
-                end_ll = start_ll
+                if not end_ll:
+                    raise Exception(f"could not pinpoint destination location: '{request.end_location}'")
+            else:
+                raise Exception("Google Maps API Key not configured")
 
             # 1.5. Base Walk Sanity Check
             yield "data: " + json.dumps({"type": "status", "message": "verifying distance feasibility..."}) + "\n\n"
@@ -952,8 +1378,10 @@ async def generate_route(request: RouteRequest):
             yield "data: " + json.dumps({"type": "status", "message": "searching for verified venues..."}) + "\n\n"
             
             # Check for custom vibe and extract queries if needed
-            is_custom = request.vibe not in VIBE_QUERIES
-            if is_custom:
+            if request.vibe == "Feeling Lucky":
+                yield "data: " + json.dumps({"type": "status", "message": "spinning the wheel: generating a surprise theme..."}) + "\n\n"
+                queries = await _extract_lucky_queries()
+            elif request.vibe not in VIBE_QUERIES:
                 yield "data: " + json.dumps({"type": "status", "message": f"interpreting custom vibe: '{request.vibe}'..."}) + "\n\n"
                 queries = await _extract_custom_queries(request.vibe)
             else:
@@ -966,33 +1394,84 @@ async def generate_route(request: RouteRequest):
             time_scale_radius = (request.time_budget_minutes / 30.0) * 500.0
             
             if is_round_trip:
-                # Loop / Round Trip: search radius based solely on time budget, centered on start
-                radius_m = max(1000.0, min(5000.0, time_scale_radius))
+                # Loop / Round Trip: search radius scaled down so walking time doesn't consume the budget
+                radius_m = max(600.0, min(1500.0, time_scale_radius * 0.4))
                 centers = [start_ll]
                 print(f"Round Trip detected. Radius: {radius_m:.0f}m, Center: {start_ll}")
             else:
-                # Progression route: radius scales with distance and time budget
-                radius_m = max(500.0, min(3000.0, (dist_m / 3.0) * 0.7 + time_scale_radius * 0.3))
+                # Progression route: Fetch baseline direct walking polyline from Directions API,
+                # then dynamically sample center coordinates along the path (1 point per 800m).
+                radius_m = 400.0  # Tight radius for targeted local sweeps along path
+                centers = [start_ll]
                 
-                def interpolate(a, b, fraction):
-                    return {
-                        "lat": a["lat"] + (b["lat"] - a["lat"]) * fraction,
-                        "lng": a["lng"] + (b["lng"] - a["lng"]) * fraction
-                    }
+                # Fetch baseline route overview polyline
+                decoded_coords = []
+                try:
+                    async with httpx.AsyncClient(timeout=6.0) as client:
+                        directions_url = "https://maps.googleapis.com/maps/api/directions/json"
+                        res = await client.get(
+                            directions_url,
+                            params={
+                                "origin": f"{start_ll['lat']},{start_ll['lng']}",
+                                "destination": f"{end_ll['lat']},{end_ll['lng']}",
+                                "mode": "walking",
+                                "key": GOOGLE_KEY
+                            }
+                        )
+                        if res.status_code == 200:
+                            data = res.json()
+                            routes = data.get("routes", [])
+                            if routes:
+                                poly_str = routes[0].get("overview_polyline", {}).get("points", "")
+                                decoded_coords = polyline.decode(poly_str)
+                except Exception as e:
+                    print(f"[PATH SAMPLING EXCEPTION] Directions query failed: {e}")
                 
-                centers = [
-                    interpolate(start_ll, end_ll, 0.25),
-                    interpolate(start_ll, end_ll, 0.50),
-                    interpolate(start_ll, end_ll, 0.75),
-                ]
-                print(f"Progression route. Distance: {dist_m:.0f}m, Radius: {radius_m:.0f}m, Centers: 3 points")
+                if decoded_coords:
+                    # Dynamically scale intermediate points: 1 point per 800m (min 2, max 5)
+                    num_samples = max(2, min(5, int(dist_m / 800.0)))
+                    L = len(decoded_coords)
+                    if L > num_samples + 1:
+                        for i in range(1, num_samples + 1):
+                            idx = int(i * (L - 1) / (num_samples + 1))
+                            centers.append({"lat": decoded_coords[idx][0], "lng": decoded_coords[idx][1]})
+                else:
+                    # Fallback to geodetic linear interpolation if Directions API fails or polyline is empty
+                    def interpolate(a, b, fraction):
+                        return {
+                            "lat": a["lat"] + (b["lat"] - a["lat"]) * fraction,
+                            "lng": a["lng"] + (b["lng"] - a["lng"]) * fraction
+                        }
+                    centers.extend([
+                        interpolate(start_ll, end_ll, 0.25),
+                        interpolate(start_ll, end_ll, 0.50),
+                        interpolate(start_ll, end_ll, 0.75),
+                    ])
+                
+                centers.append(end_ll)
+                print(f"Progression route. Distance: {dist_m:.0f}m, Radius: {radius_m:.0f}m, Centers: {len(centers)} sampled path points")
+
+            # Deduplicate centers within 150m of each other
+            unique_centers = []
+            for c in centers:
+                if not any(_coordinate_distance_m(c, uc) < 150.0 for uc in unique_centers):
+                    unique_centers.append(c)
 
             tasks = []
-            for center in centers:
+            for center in unique_centers:
+                # Call OpenTripMap once per unique center point
+                tasks.append(_opentripmap_places_search(center["lat"], center["lng"], radius_m=radius_m))
                 for q in queries:
+                    # Google search
                     tasks.append(_places_search_text(q, center["lat"], center["lng"], radius_m=radius_m))
+                    # Foursquare search
+                    tasks.append(_foursquare_places_search(q, center["lat"], center["lng"], radius_m=radius_m))
             
             results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for r in results:
+                if isinstance(r, Exception):
+                    raise r
             
             seen = set()
             for batch in results:
@@ -1004,8 +1483,10 @@ async def generate_route(request: RouteRequest):
                             
                             # Compute vector progression percentage along the start -> end vector
                             if is_round_trip:
-                                # For a loop route, progression along the line doesn't apply (all points near start)
-                                progression = 0.0
+                                # For a loop route, sort by polar angle around start to form a natural loop
+                                angle = math.atan2(place["lat"] - start_ll["lat"], place["lng"] - start_ll["lng"])
+                                # Map angle from [-pi, pi] to [0.0, 1.0]
+                                progression = (angle + math.pi) / (2.0 * math.pi)
                             else:
                                 v_lat = end_ll["lat"] - start_ll["lat"]
                                 v_lng = end_ll["lng"] - start_ll["lng"]
@@ -1188,16 +1669,38 @@ async def reverse_geocode(lat: float, lng: float):
 async def pacing_advisor(request: AdvisorRequest):
     # Try geocoding start and end
     start_ll = await geocode_location(request.start_location)
-    end_ll = await geocode_location(request.end_location)
-    
     if not start_ll:
-        start_ll = {"lat": 40.7580, "lng": -73.9855} # default NYC
+        raise HTTPException(status_code=400, detail=f"could not pinpoint starting location: '{request.start_location}'")
+    end_ll = await geocode_location(request.end_location)
     if not end_ll:
-        end_ll = start_ll
+        raise HTTPException(status_code=400, detail=f"could not pinpoint destination location: '{request.end_location}'")
         
     dist_m = _coordinate_distance_m(start_ll, end_ll)
-    # Estimate base walk minutes (80m/min walking speed)
-    base_walk_mins = int((dist_m * 1.3) / 80.0)
+    
+    # Query Google Directions API if distance > 100 meters, matching route generation
+    base_walk_mins = 0
+    if dist_m > 100.0:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                res = await client.get(
+                    "https://maps.googleapis.com/maps/api/directions/json",
+                    params={
+                        "origin": f"{start_ll['lat']},{start_ll['lng']}",
+                        "destination": f"{end_ll['lat']},{end_ll['lng']}",
+                        "mode": "walking",
+                        "key": GOOGLE_KEY,
+                    },
+                )
+                data = res.json()
+                if data.get("status") == "OK":
+                    secs = data["routes"][0]["legs"][0]["duration"]["value"]
+                    base_walk_mins = round(secs / 60)
+                else:
+                    base_walk_mins = int((dist_m * 1.3) / 80.0)
+        except Exception:
+            base_walk_mins = int((dist_m * 1.3) / 80.0)
+    else:
+        base_walk_mins = 0
     
     # Heuristics safety check: force impossible status if budget is less than 15 mins per stop
     if request.time_budget_minutes < request.num_stops * 15:
@@ -1279,12 +1782,12 @@ async def pacing_advisor(request: AdvisorRequest):
         if weather_info and weather_info["is_adverse"] and not parsed.weather_advice:
             parsed.weather_advice = f"rainy weather: we recommend choosing fewer outdoor stops today"
         
-        # Enforce all-lowercase branding and period-free on text fields
-        parsed.detected_neighborhood = parsed.detected_neighborhood.lower().rstrip(".")
-        parsed.pacing_message = parsed.pacing_message.lower().rstrip(".")
-        parsed.density_badge_message = parsed.density_badge_message.lower().rstrip(".")
+        # Enforce period-free on text fields (natural case)
+        parsed.detected_neighborhood = parsed.detected_neighborhood.strip().rstrip(".")
+        parsed.pacing_message = parsed.pacing_message.strip().rstrip(".")
+        parsed.density_badge_message = parsed.density_badge_message.strip().rstrip(".")
         if parsed.weather_advice:
-            parsed.weather_advice = parsed.weather_advice.lower().rstrip(".")
+            parsed.weather_advice = parsed.weather_advice.strip().rstrip(".")
             
         return parsed
     except Exception as e:
@@ -1301,98 +1804,642 @@ async def pacing_advisor(request: AdvisorRequest):
         )
 
 
-@app.post("/api/suggest-vibe-preset", response_model=PresetsResponse)
-async def suggest_vibe_preset(request: PresetRequest):
-    start_ll = await geocode_location(request.start_location)
-    if not start_ll:
-        start_ll = {"lat": 40.7580, "lng": -73.9855} # default NYC
-        
-    weather_info = await _get_weather(start_ll["lat"], start_ll["lng"])
-    weather_str = "unknown weather"
-    if weather_info:
-        weather_str = f"{weather_info['main']} ({weather_info['description']}), {weather_info['temp_c']}°C"
-        
-    preset_system_prompt = (
-        "you are a creative walk planner for the 'wander' app. "
-        "your goal is to recommend exactly 3 highly personalized, localized walking presets based on the start location, local time, and weather.\n\n"
-        "guidelines:\n"
-        "1. never use any capital letters (e.g. use 'hell\\'s kitchen stroll', not 'Hell\\'s Kitchen Stroll').\n"
-        "2. never end any sentences with a period. use playful, relaxed punctuation (like commas or exclamation marks if needed).\n"
-        "3. return exactly 3 presets tailored to the conditions:\n"
-        "   - morning: suggest breakfast, bakeries, coffee walks.\n"
-        "   - evening/night: suggest cozy bars, twilight vistas, illuminated lanes.\n"
-        "   - rainy/cold: suggest indoor passages, museums, covered food courts, art halls.\n"
-        "   - companion profiles: assign varied companions ('solo', 'date', 'friends', 'pet') to show options.\n"
-        "4. assign a catch title (title) like 'espresso crawl' or 'quiet garden loop'.\n"
-        "5. assign a vibe string (vibe) which is a list of comma-separated search terms or description (e.g. 'bookstore, small cafe, art gallery').\n"
-        "6. assign a recommended time_budget in minutes (typically 60 to 120).\n"
-        "7. assign a recommended num_stops (between 2 and 5).\n"
-        "8. assign free_only boolean (True or False).\n"
-        "9. assign companion ('solo' | 'date' | 'friends' | 'pet').\n"
-        "10. write a short reason (reason) explaining why this fits the time of day, weather, or location (e.g. 'perfect for a warm date night sunset walk')."
-    )
+class SwappedWaypointLLM(BaseModel):
+    selected_candidate_index: int = Field(..., description="Index (1-based) of the selected candidate from the list")
+    action_description: str = Field(..., description="Playful, lowercase action description tailored to this stop and the companion profile")
+    duration_mins: int = Field(..., description="Realistic duration in minutes (e.g. 15-45 mins depending on type)")
+    vibe_tag: str = Field(..., description="1-2 word micro-label e.g. 'Coffee Fix', 'Secret Garden'")
+    insider_tip: str = Field(..., description="Genuinely useful insider tip specific to this venue")
+    estimated_cost_usd: int = Field(..., description="Estimated cost in USD per person for this stop. Use 0 for free stops.")
 
+
+class WaypointSwapRequest(BaseModel):
+    route: WanderRouteOptionV3
+    index: int
+    vibe: str
+    custom_refinement: Optional[str] = None
+    max_budget_usd: Optional[int] = 50
+
+
+class VibeDetourRequest(BaseModel):
+    model_config = {"populate_by_name": True}
+    
+    current_lat: float = Field(..., validation_alias="lat")
+    current_lng: float = Field(..., validation_alias="lng")
+    vibe: str
+    remaining_budget_usd: Optional[int] = Field(50, validation_alias="max_budget_usd")
+    exclude_place_ids: Optional[List[str]] = Field([], validation_alias="current_itinerary_place_ids")
+
+
+class DetourWaypointLLM(BaseModel):
+    selected_candidate_index: int = Field(..., description="Index (1-based) of the selected candidate from the list")
+    action_description: str = Field(..., description="Playful, lowercase action description tailored to this detour stop")
+    duration_mins: int = Field(..., description="Realistic duration in minutes (e.g. 15-45 mins depending on type)")
+    vibe_tag: str = Field(..., description="1-2 word micro-label e.g. 'Coffee Fix', 'Secret Garden', 'Overlook'")
+    insider_tip: str = Field(..., description="Genuinely useful insider tip specific to this detour venue")
+    estimated_cost_usd: int = Field(..., description="Estimated cost in USD per person for this detour. Use 0 for free stops.")
+
+
+class VibeDetourResponse(BaseModel):
+    waypoint: WaypointV3
+    walk_to_detour_mins: int
+
+
+class RoutePivotRequest(BaseModel):
+    route: WanderRouteOptionV3
+    detour_waypoint: WaypointV3
+    index: int
+
+
+def _call_openai_single_venue_swap_sync(
+    route: WanderRouteOptionV3,
+    index: int,
+    vibe: str,
+    custom_refinement: Optional[str],
+    candidates: List[Dict],
+    max_budget_usd: Optional[int] = 50
+) -> SwappedWaypointLLM:
+    candidate_lines = [
+        f"[{i+1}] {c['name']} | {c['address']} | "
+        f"{'⭐ ' + str(c['rating']) if c.get('rating') else 'no rating'} | "
+        f"{', '.join(c['types'][:2]) if c.get('types') else ''}"
+        for i, c in enumerate(candidates)
+    ]
+    candidates_context = "\n".join(candidate_lines)
+
+    # Context about the route
+    prev_wp = route.waypoints[index - 1].location_name if index > 0 else "Start Location"
+    next_wp = route.waypoints[index + 1].location_name if index + 1 < len(route.waypoints) else "End Location"
+    current_wp = route.waypoints[index].location_name
+
+    refinement_chunk = f"The user rejected the stop '{current_wp}' and wants a replacement stop instead."
+    if custom_refinement:
+        refinement_chunk += f" Specifically, they want: '{custom_refinement}'."
+
+    current_other_stops_cost = sum(
+        w.estimated_cost_usd or 0 for idx, w in enumerate(route.waypoints) if idx != index
+    )
+    remaining_budget = max(0, max_budget_usd - current_other_stops_cost) if max_budget_usd is not None and max_budget_usd < 150 else None
+
+    budget_chunk = ""
+    if remaining_budget is not None:
+        budget_chunk = (
+            f"BUDGET CONSTRAINT: The current route has a total budget constraint. "
+            f"The other stops already cost a total of ${current_other_stops_cost} USD. "
+            f"This replacement stop MUST have an estimated_cost_usd of at most ${remaining_budget} USD "
+            f"so that the overall route remains within the user's budget.\n"
+        )
+
+    system_prompt = f"""You are wander — an urban experience curator.
+We need to replace exactly one stop in an existing itinerary.
+
+CURRENT ROUTE SUMMARY:
+- Route Name: {route.route_name}
+- Current Stops: {', '.join(w.location_name for w in route.waypoints)}
+- Swap Target Stop: '{current_wp}' at index {index} (between '{prev_wp}' and '{next_wp}')
+
+REPLACEMENT REQUEST:
+{refinement_chunk}
+
+{budget_chunk}
+CANDIDATE VENUES:
+{candidates_context}
+
+MISSION:
+Choose exactly ONE venue from the candidate list that is the best replacement for the target stop. It must fit between the previous stop ('{prev_wp}') and next stop ('{next_wp}') logistically and thematically.
+Return the index (1-based) of your choice and write a local, warm, lowercased action description and a specific insider tip.
+Do not use capital letters or end sentences with periods. Write like a local who has lived here 10 years."""
+
+    response = openai_client.beta.chat.completions.parse(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "Choose the best candidate and curate the waypoint details."}
+        ],
+        response_format=SwappedWaypointLLM,
+        temperature=0.7
+    )
+    return response.choices[0].message.parsed
+
+
+def _call_openai_single_venue_detour_sync(
+    vibe: str,
+    candidates: List[Dict],
+    remaining_budget_usd: Optional[int] = 50
+) -> DetourWaypointLLM:
+    candidate_lines = [
+        f"[{i+1}] {c['name']} | {c['address']} | "
+        f"{'⭐ ' + str(c['rating']) if c.get('rating') else 'no rating'} | "
+        f"{', '.join(c['types'][:2]) if c.get('types') else ''}"
+        for i, c in enumerate(candidates)
+    ]
+    candidates_context = "\n".join(candidate_lines)
+
+    budget_chunk = ""
+    if remaining_budget_usd is not None:
+        budget_chunk = (
+            f"BUDGET CONSTRAINT: This detour stop MUST have an estimated_cost_usd of at most ${remaining_budget_usd} USD.\n"
+        )
+
+    system_prompt = f"""You are wander — an urban experience curator.
+We need to select exactly ONE spontaneous detour waypoint for a user currently walking.
+
+DETOUR REQUEST:
+- The active vibe is '{vibe}'.
+{budget_chunk}
+CANDIDATE VENUES:
+{candidates_context}
+
+MISSION:
+Choose exactly ONE venue from the candidate list that makes the absolute best spontaneous, trending, or highly interesting detour.
+Prefer Foursquare places if they have a hot-and-new or popular vibe, or OpenTripMap places if they are a gorgeous scenic overlook, public sculpture, or historic landmark nearby.
+Return the index (1-based) of your choice and write a local, warm, lowercased action description and a specific insider tip.
+Do not use capital letters or end sentences with periods. Write like a local who has lived here 10 years."""
+
+    response = openai_client.beta.chat.completions.parse(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "Choose the best candidate and curate the detour waypoint details."}
+        ],
+        response_format=DetourWaypointLLM,
+        temperature=0.7
+    )
+    return response.choices[0].message.parsed
+
+
+@app.post("/api/swap-waypoint", response_model=WanderRouteOptionV3)
+async def swap_waypoint(request: WaypointSwapRequest):
+    route = request.route
+    index = request.index
+    
+    if index < 0 or index >= len(route.waypoints):
+        raise HTTPException(status_code=400, detail="Invalid waypoint index")
+        
+    target_wp = route.waypoints[index]
+    # Geocode fallbacks
+    lat = target_wp.lat or route.start_lat or 40.7580
+    lng = target_wp.lng or route.start_lng or -73.9855
+    
+    # 1. Places queries centered at the target stop coordinate
+    if request.custom_refinement:
+        # Extract specific queries from custom text
+        queries = await _extract_custom_queries(request.custom_refinement)
+    else:
+        # Surprise me: pull from current vibe queries, or default
+        queries = VIBE_QUERIES.get(request.vibe, ["unique cafe", "pocket park", "community garden", "independent bookstore", "scenic spot"])
+        
+    # Search around target waypoint
+    swap_tasks = []
+    swap_tasks.append(_opentripmap_places_search(lat, lng, radius_m=1200.0))
+    for q in queries:
+        swap_tasks.append(_places_search_text(q, lat, lng, radius_m=1200.0))
+        swap_tasks.append(_foursquare_places_search(q, lat, lng, radius_m=1200.0))
+        
+    results = await asyncio.gather(*swap_tasks, return_exceptions=True)
+    
+    # Filter out current route waypoints (dedup by name/place_id)
+    existing_place_ids = {wp.place_id for wp in route.waypoints if wp.place_id}
+    existing_names = {wp.location_name.lower().strip() for wp in route.waypoints}
+    
+    def process_batches(batches):
+        for r in batches:
+            if isinstance(r, Exception):
+                raise r
+        seen = set()
+        cands = []
+        for batch in batches:
+            if isinstance(batch, list):
+                for place in batch:
+                    pid = place.get("place_id") or place.get("name", "")
+                    if pid and pid not in seen and place.get("name"):
+                        seen.add(pid)
+                        # Check if already in route
+                        if pid in existing_place_ids:
+                            continue
+                        if place["name"].lower().strip() in existing_names:
+                            continue
+                        cands.append(place)
+        return cands
+
+    candidates = process_batches(results)
+    
+    # Fallback search if zero candidates found in 1.2km
+    if not candidates:
+        if request.custom_refinement:
+            # Custom refinement fallback: just expand the radius to 2500m
+            print(f"[SWAP FALLBACK] Retrying custom queries {queries} with radius=2500m")
+            fallback_tasks = []
+            fallback_tasks.append(_opentripmap_places_search(lat, lng, radius_m=2500.0))
+            for q in queries:
+                fallback_tasks.append(_places_search_text(q, lat, lng, radius_m=2500.0))
+                fallback_tasks.append(_foursquare_places_search(q, lat, lng, radius_m=2500.0))
+            fallback_results = await asyncio.gather(*fallback_tasks, return_exceptions=True)
+            candidates = process_batches(fallback_results)
+        else:
+            # Surprise me fallback: broaden queries and expand radius to 2500m
+            broad_queries = []
+            for q in queries:
+                words = q.split()
+                if len(words) > 1:
+                    broad_queries.append(" ".join(words[:2]))
+                    broad_queries.append(words[-1])
+                else:
+                    broad_queries.append(q)
+            
+            vibe_generics = {
+                "Caffeinated & Cultured": ["cafe", "bookstore", "art gallery"],
+                "Green & Scenic": ["park", "garden", "waterfront"],
+                "Spontaneous & Social": ["bar", "food hall", "music venue"],
+                "Mental Break": ["park", "cafe", "bakery"],
+                "Off the Grid": ["historic landmark", "thrift store", "hidden garden"],
+                "Feeling Lucky": ["speakeasy", "museum", "oddities"]
+            }
+            generics = vibe_generics.get(request.vibe, ["cafe", "park", "scenic spot"])
+            broad_queries = list(set(broad_queries + generics))
+            
+            print(f"[SWAP FALLBACK] Retrying vibe queries {broad_queries} with radius=2500m")
+            fallback_tasks = []
+            fallback_tasks.append(_opentripmap_places_search(lat, lng, radius_m=2500.0))
+            for q in broad_queries:
+                fallback_tasks.append(_places_search_text(q, lat, lng, radius_m=2500.0))
+                fallback_tasks.append(_foursquare_places_search(q, lat, lng, radius_m=2500.0))
+            fallback_results = await asyncio.gather(*fallback_tasks, return_exceptions=True)
+            candidates = process_batches(fallback_results)
+            
+    # Sort candidates by rating
+    candidates.sort(key=lambda x: x.get("rating") or 0, reverse=True)
+    candidates = candidates[:10]
+    
+    if not candidates:
+        raise HTTPException(status_code=404, detail="No suitable swap candidates found nearby. Try a different request.")
+        
+    # 2. Select replacement with LLM
     loop = asyncio.get_event_loop()
-    temperature = 1.1 if request.refresh else 0.8
     try:
-        response = await loop.run_in_executor(
+        swapped_llm = await loop.run_in_executor(
             None,
-            lambda: openai_client.beta.chat.completions.parse(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": preset_system_prompt},
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Start Location: {request.start_location}\n"
-                            f"Local Time: {request.local_time or 'unknown'}\n"
-                            f"Current Weather: {weather_str}"
-                        )
-                    }
-                ],
-                response_format=PresetsResponse,
-                temperature=temperature
+            lambda: _call_openai_single_venue_swap_sync(
+                route,
+                index,
+                request.vibe,
+                request.custom_refinement,
+                candidates,
+                request.max_budget_usd
             )
         )
-        parsed = response.choices[0].message.parsed
-        # Enforce all-lowercase branding and period-free on text fields
-        for p in parsed.presets:
-            p.title = p.title.lower().rstrip(".")
-            p.vibe = p.vibe.lower().rstrip(".")
-            p.reason = p.reason.lower().rstrip(".")
-            
-        return parsed
     except Exception as e:
-        print(f"Error calling vibe preset LLM: {e}")
-        # fallback
-        return PresetsResponse(
-            presets=[
-                PresetOption(
-                    title="cozy cafe stroll",
-                    vibe="bakery, indie cafe, cozy seating",
-                    time_budget=90,
-                    num_stops=3,
-                    free_only=False,
-                    companion="solo",
-                    reason="perfect for a quiet coffee break in the neighborhood"
-                ),
-                PresetOption(
-                    title="green garden wander",
-                    vibe="public park, green space, botanical garden",
-                    time_budget=60,
-                    num_stops=2,
-                    free_only=True,
-                    companion="pet",
-                    reason="an outdoor loop tailored for fresh air and pets"
-                ),
-                PresetOption(
-                    title="culture & history walk",
-                    vibe="museum, library, historic landmark",
-                    time_budget=120,
-                    num_stops=4,
-                    free_only=False,
-                    companion="friends",
-                    reason="a comprehensive cultural tour with friends"
-                )
-            ]
+        print(f"Error calling swap LLM: {e}")
+        raise HTTPException(status_code=500, detail=f"LLM swap curation failed: {str(e)}")
+        
+    # Build replacement WaypointV3
+    idx = swapped_llm.selected_candidate_index - 1
+    if idx < 0 or idx >= len(candidates):
+        idx = 0
+        
+    selected_venue = candidates[idx]
+    
+    new_wp = WaypointV3(
+        order=index + 1,
+        location_name=selected_venue["name"].strip().rstrip('.'),
+        address_hint=selected_venue["address"],
+        google_rating=selected_venue.get("rating"),
+        photo_url=selected_venue.get("photo_url"),
+        place_id=selected_venue.get("place_id"),
+        lat=selected_venue.get("lat"),
+        lng=selected_venue.get("lng"),
+        action_description=swapped_llm.action_description.strip().rstrip('.'),
+        duration_mins=swapped_llm.duration_mins,
+        walk_to_next_mins=0,
+        vibe_tag=swapped_llm.vibe_tag.strip().rstrip('.'),
+        insider_tip=swapped_llm.insider_tip.strip().rstrip('.'),
+        estimated_cost_usd=swapped_llm.estimated_cost_usd,
+    )
+
+    # Enrich selected swapped stop details
+    pid = new_wp.place_id or ""
+    insider_tip = new_wp.insider_tip
+    address = new_wp.address_hint
+    photo_url = new_wp.photo_url
+    if pid.startswith("fsq:"):
+        fsq_id = pid.split(":", 1)[1]
+        fsq_details = await _foursquare_get_details(fsq_id)
+        if fsq_details:
+            tips = fsq_details.get("tips", [])
+            if tips:
+                tip_text = tips[0].get("text", "")
+                if tip_text:
+                    insider_tip = f"{insider_tip} (local tip: \"{tip_text.rstrip('.')}\")"
+            photos = fsq_details.get("photos", [])
+            if photos and not photo_url:
+                prefix = photos[0].get("prefix", "")
+                suffix = photos[0].get("suffix", "")
+                if prefix and suffix:
+                    photo_url = f"{prefix}800x500{suffix}"
+    elif pid.startswith("otm:"):
+        xid = pid.split(":", 1)[1]
+        otm_details = await _opentripmap_get_details(xid)
+        if otm_details:
+            wiki = otm_details.get("wikipedia_extracts", {}).get("text", "")
+            if wiki:
+                insider_tip = f"{insider_tip} (about: {wiki[:220].rstrip('.') if len(wiki) > 220 else wiki.rstrip('.')})"
+            addr_info = otm_details.get("address", {})
+            if addr_info:
+                road = addr_info.get("road", "")
+                house = addr_info.get("house_number", "")
+                suburb = addr_info.get("suburb", "")
+                constructed_addr = f"{house} {road}, {suburb}".strip(", ")
+                if constructed_addr:
+                    address = constructed_addr
+            preview = data.get("preview", {}) if "data" in locals() else otm_details.get("preview", {})
+            if preview:
+                photo_url = preview.get("source") or photo_url
+
+    new_wp.insider_tip = insider_tip
+    new_wp.address_hint = address
+    new_wp.photo_url = photo_url
+    
+    # 3. Swap in route waypoints list
+    route.waypoints[index] = new_wp
+    
+    # 4. Recompute walking times
+    directions_locations = []
+    if route.start_lat is not None and route.start_lng is not None:
+        directions_locations.append(f"{route.start_lat},{route.start_lng}")
+    else:
+        directions_locations.append(route.start_location)
+        
+    for wp in route.waypoints:
+        if wp.lat is not None and wp.lng is not None:
+            directions_locations.append(f"{wp.lat},{wp.lng}")
+        else:
+            directions_locations.append(wp.address_hint)
+            
+    if route.end_lat is not None and route.end_lng is not None:
+        directions_locations.append(f"{route.end_lat},{route.end_lng}")
+    else:
+        directions_locations.append(route.end_location)
+        
+    walk_times = await get_walking_times(directions_locations)
+    
+    route.initial_walk_mins = walk_times[0] if walk_times else 0
+    for i, wp_obj in enumerate(route.waypoints):
+        wp_obj.walk_to_next_mins = walk_times[i + 1] if i + 1 < len(walk_times) else 0
+        
+    # Recalculate total time
+    route.total_walking_time_mins = sum(w.duration_mins + w.walk_to_next_mins for w in route.waypoints) + route.initial_walk_mins
+    
+    # Recalculate route total cost
+    route.estimated_total_cost_usd = sum(w.estimated_cost_usd or 0 for w in route.waypoints)
+
+    # Update navigation deep link
+    route.navigation_deep_link = build_maps_deep_link(
+        f"{route.start_lat},{route.start_lng}" if (route.start_lat is not None) else route.start_location,
+        f"{route.end_lat},{route.end_lng}" if (route.end_lat is not None) else route.end_location,
+        [f"{w.lat},{w.lng}" if (w.lat is not None and w.lng is not None) else w.address_hint for w in route.waypoints],
+        [w.place_id for w in route.waypoints],
+    )
+    
+    return route
+
+
+@app.post("/api/vibe-detour", response_model=VibeDetourResponse)
+async def vibe_detour(request: VibeDetourRequest):
+    lat = request.current_lat
+    lng = request.current_lng
+    vibe = request.vibe
+    
+    # Get active queries based on vibe, combined with popular spontaneous detour types
+    vibe_queries = VIBE_QUERIES.get(vibe, [])
+    base_queries = ["matcha", "dessert", "bakery", "vinyl record", "independent bookstore", "scenic overlook", "public sculpture"]
+    queries = list(set(vibe_queries + base_queries))[:5]
+    
+    # 1. Parallel search for Foursquare & OpenTripMap
+    tasks = []
+    tasks.append(_opentripmap_places_search(lat, lng, radius_m=500.0))
+    for q in queries:
+        tasks.append(_foursquare_places_search(q, lat, lng, radius_m=500.0))
+        
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Process and deduplicate candidates
+    exclude_ids = set(request.exclude_place_ids or [])
+    seen_names = set()
+    candidates = []
+    
+    for r in results:
+        if isinstance(r, Exception):
+            print(f"[DETOUR SEARCH ERROR] {r}")
+            continue
+        if isinstance(r, list):
+            for place in r:
+                pid = place.get("place_id") or place.get("name", "")
+                name = place.get("name", "").lower().strip()
+                if not name or pid in exclude_ids or name in seen_names:
+                    continue
+                seen_names.add(name)
+                
+                # Check distance to current user coordinates
+                dist_m = _coordinate_distance_m({"lat": lat, "lng": lng}, {"lat": place["lat"], "lng": place["lng"]})
+                # Filter out anything too far (e.g. > 600m) to keep it within 5-7 mins walk
+                if dist_m > 600.0:
+                    continue
+                
+                # Assign score
+                rating = place.get("rating")
+                score = (rating or 4.0) - (dist_m / 200.0)
+                place["distance_m"] = dist_m
+                place["score"] = score
+                candidates.append(place)
+                
+    # Sort candidates by score descending
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    candidates = candidates[:10]
+    
+    if not candidates:
+        # Try fallback with broader radius if nothing found in 500m
+        fallback_tasks = []
+        fallback_tasks.append(_opentripmap_places_search(lat, lng, radius_m=1000.0))
+        for q in ["cafe", "park", "landmark"]:
+            fallback_tasks.append(_foursquare_places_search(q, lat, lng, radius_m=1000.0))
+        fallback_results = await asyncio.gather(*fallback_tasks, return_exceptions=True)
+        
+        for r in fallback_results:
+            if isinstance(r, Exception):
+                continue
+            if isinstance(r, list):
+                for place in r:
+                    pid = place.get("place_id") or place.get("name", "")
+                    name = place.get("name", "").lower().strip()
+                    if not name or pid in exclude_ids or name in seen_names:
+                        continue
+                    seen_names.add(name)
+                    dist_m = _coordinate_distance_m({"lat": lat, "lng": lng}, {"lat": place["lat"], "lng": place["lng"]})
+                    if dist_m > 1200.0:
+                        continue
+                    rating = place.get("rating")
+                    score = (rating or 4.0) - (dist_m / 200.0)
+                    place["distance_m"] = dist_m
+                    place["score"] = score
+                    candidates.append(place)
+        candidates.sort(key=lambda x: x["score"], reverse=True)
+        candidates = candidates[:10]
+        
+    if not candidates:
+        raise HTTPException(status_code=404, detail="No suitable detours found nearby. Keep walking!")
+        
+    # 2. Select with LLM
+    loop = asyncio.get_event_loop()
+    try:
+        detour_llm = await loop.run_in_executor(
+            None,
+            lambda: _call_openai_single_venue_detour_sync(
+                vibe,
+                candidates,
+                request.remaining_budget_usd
+            )
         )
+    except Exception as e:
+        print(f"Error calling detour LLM: {e}")
+        raise HTTPException(status_code=500, detail=f"LLM detour curation failed: {str(e)}")
+        
+    idx = detour_llm.selected_candidate_index - 1
+    if idx < 0 or idx >= len(candidates):
+        idx = 0
+        
+    selected_venue = candidates[idx]
+    
+    # 3. Create WaypointV3
+    waypoint = WaypointV3(
+        order=1, # Order will be set when merged
+        location_name=selected_venue["name"].strip().rstrip('.'),
+        address_hint=selected_venue["address"],
+        google_rating=selected_venue.get("rating"),
+        photo_url=selected_venue.get("photo_url"),
+        place_id=selected_venue.get("place_id"),
+        lat=selected_venue.get("lat"),
+        lng=selected_venue.get("lng"),
+        action_description=detour_llm.action_description.strip().rstrip('.'),
+        duration_mins=detour_llm.duration_mins,
+        walk_to_next_mins=0,
+        vibe_tag=detour_llm.vibe_tag.strip().rstrip('.'),
+        insider_tip=detour_llm.insider_tip.strip().rstrip('.'),
+        estimated_cost_usd=detour_llm.estimated_cost_usd,
+    )
+    
+    # 4. Enrich details
+    pid = waypoint.place_id or ""
+    insider_tip = waypoint.insider_tip
+    address = waypoint.address_hint
+    photo_url = waypoint.photo_url
+    
+    if pid.startswith("fsq:"):
+        fsq_id = pid.split(":", 1)[1]
+        fsq_details = await _foursquare_get_details(fsq_id)
+        if fsq_details:
+            tips = fsq_details.get("tips", [])
+            if tips:
+                tip_text = tips[0].get("text", "")
+                if tip_text:
+                    insider_tip = f"{insider_tip} (local tip: \"{tip_text.rstrip('.')}\")"
+            photos = fsq_details.get("photos", [])
+            if photos and not photo_url:
+                prefix = photos[0].get("prefix", "")
+                suffix = photos[0].get("suffix", "")
+                if prefix and suffix:
+                    photo_url = f"{prefix}800x500{suffix}"
+    elif pid.startswith("otm:"):
+        xid = pid.split(":", 1)[1]
+        otm_details = await _opentripmap_get_details(xid)
+        if otm_details:
+            wiki = otm_details.get("wikipedia_extracts", {}).get("text", "")
+            if wiki:
+                insider_tip = f"{insider_tip} (about: {wiki[:220].rstrip('.') if len(wiki) > 220 else wiki.rstrip('.')})"
+            addr_info = otm_details.get("address", {})
+            if addr_info:
+                road = addr_info.get("road", "")
+                house = addr_info.get("house_number", "")
+                suburb = addr_info.get("suburb", "")
+                constructed_addr = f"{house} {road}, {suburb}".strip(", ")
+                if constructed_addr:
+                    address = constructed_addr
+            preview = otm_details.get("preview", {})
+            if preview:
+                photo_url = preview.get("source") or photo_url
+                
+    waypoint.insider_tip = insider_tip
+    waypoint.address_hint = address
+    waypoint.photo_url = photo_url
+    
+    # 5. Calculate walk time from current user position to detour waypoint
+    walk_to_detour_mins = 0
+    if waypoint.lat is not None and waypoint.lng is not None:
+        directions_locations = [f"{lat},{lng}", f"{waypoint.lat},{waypoint.lng}"]
+        legs = await get_route_legs_info(directions_locations)
+        if legs:
+            walk_to_detour_mins = legs[0]["duration_mins"]
+        else:
+            dist_m = selected_venue.get("distance_m") or _coordinate_distance_m({"lat": lat, "lng": lng}, {"lat": waypoint.lat, "lng": waypoint.lng})
+            walk_to_detour_mins = max(1, int(dist_m / 80.0))
+            
+    return VibeDetourResponse(
+        waypoint=waypoint,
+        walk_to_detour_mins=walk_to_detour_mins
+    )
+
+
+@app.post("/api/pivot-route", response_model=WanderRouteOptionV3)
+async def pivot_route(request: RoutePivotRequest):
+    route = request.route
+    detour_wp = request.detour_waypoint
+    index = request.index
+    
+    if index < 0 or index >= len(route.waypoints):
+        raise HTTPException(status_code=400, detail="Invalid waypoint index")
+        
+    # Replace stop at index with the detour stop, and make sure order is updated
+    detour_wp.order = index + 1
+    route.waypoints[index] = detour_wp
+    
+    # Recompute walking times for the entire new route
+    directions_locations = []
+    if route.start_lat is not None and route.start_lng is not None:
+        directions_locations.append(f"{route.start_lat},{route.start_lng}")
+    else:
+        directions_locations.append(route.start_location)
+        
+    for wp in route.waypoints:
+        if wp.lat is not None and wp.lng is not None:
+            directions_locations.append(f"{wp.lat},{wp.lng}")
+        else:
+            directions_locations.append(wp.address_hint)
+            
+    if route.end_lat is not None and route.end_lng is not None:
+        directions_locations.append(f"{route.end_lat},{route.end_lng}")
+    else:
+        directions_locations.append(route.end_location)
+        
+    walk_times = await get_walking_times(directions_locations)
+    
+    route.initial_walk_mins = walk_times[0] if walk_times else 0
+    for i, wp_obj in enumerate(route.waypoints):
+        wp_obj.walk_to_next_mins = walk_times[i + 1] if i + 1 < len(walk_times) else 0
+        
+    # Recalculate total time
+    route.total_walking_time_mins = sum(w.duration_mins + w.walk_to_next_mins for w in route.waypoints) + route.initial_walk_mins
+    
+    # Recalculate route total cost
+    route.estimated_total_cost_usd = sum(w.estimated_cost_usd or 0 for w in route.waypoints)
+
+    # Update navigation deep link
+    route.navigation_deep_link = build_maps_deep_link(
+        f"{route.start_lat},{route.start_lng}" if (route.start_lat is not None) else route.start_location,
+        f"{route.end_lat},{route.end_lng}" if (route.end_lat is not None) else route.end_location,
+        [f"{w.lat},{w.lng}" if (w.lat is not None and w.lng is not None) else w.address_hint for w in route.waypoints],
+        [w.place_id for w in route.waypoints],
+    )
+    
+    return route
+
+
+

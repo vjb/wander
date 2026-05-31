@@ -10,6 +10,7 @@ def init_db():
     """Initialize the database and create the shares table if it doesn't exist."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS shares (
             id TEXT PRIMARY KEY,
@@ -53,5 +54,8 @@ def get_route(share_id: str) -> Optional[dict]:
     conn.close()
     
     if row:
-        return json.loads(row[0])
+        try:
+            return json.loads(row[0])
+        except json.JSONDecodeError:
+            return None
     return None
