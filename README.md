@@ -49,21 +49,30 @@ wander accepts a starting location, an ending location, a time budget, and a des
 
 ## Key Features
 
-* **Live GPS Walk Mode**: Real-time position tracking. Card highlights toggle active states when current coordinates fall within 150 meters of a waypoint. Stop durations auto-advance when active.
-* **Spontaneous "Vibe Detours"**: While in Walk Mode, shake your phone or tap the glowing "detour me" button to discover and pivot to trending local spots (matcha cafes, vintage records, scenic overlooks) within 500m via Foursquare/OpenTripMap.
-* **Accessibility (Incline Grade Safety)**: Samples elevations along walking leg polylines using the Google Elevation API to detect and filter out routes with steep slopes (>8% grade) when avoiding slopes is requested.
-* **Budget Limits**: A custom range slider restricts RAG stop selection and estimates spend per stop to strictly stay under the user's defined per-person budget limits.
-* **Time Breakdown Indicator**: Splits route timelines into clear walking and dwell time breakdown pills (e.g. `🚶 X min walking` and `☕ Y min at stops`).
-* **Dynamic Waypoint Swapping**: Click "swap stop" to replace individual timeline nodes. Queries local candidates and uses GPT-4o to update details, recalculating directions and deep links.
-* **Feeling Lucky Vibe Profile**: Configures the query generator to construct routes with speakeasies, museums, libraries, and architectural landmarks.
-* **Neighborhood Passport**: Database entries log visited neighborhoods, vibe profiles, and completed stops to update user passport status.
-* **Round-Trip Geometry Sync**: Locks the ending coordinate to the starting coordinate to generate circular routes beginning and ending at the same location.
-* **Verified Google Places Data**: Sources stop details entirely from the Google Places API, preventing venue hallucination.
-* **Weather-Aware Curation**: Pivots to indoor venues (museums, bookstores, covered markets) when weather API detects precipitation.
-* **Daypart Transitioning**: Sequences stop types dynamically based on time of day (such as filtering out coffee shops during evening crawls).
-* **Add to Calendar (ICS)**: Generates download files preloaded with stop coordinates, ratings, stay durations, and navigation links.
-* **Shareable Routes**: Persists generated itineraries with short links (/r/abc123) for cross-user synchronization.
-* **PWA Installable**: Supports Progressive Web App deployment on mobile operating systems for full-screen integration.
+### 1. RAG & Intelligent Routing (Core Engine)
+* **Verified Google Places Data**: Sourced directly from the Google Places API (New) to prevent venue hallucinations.
+* **Weather-Aware Curation**: Auto-pivots to indoor spaces (museums, covered markets, libraries) when weather API detects active precipitation.
+* **Daypart Transitioning**: Sequences stop categories logically by time of day (e.g. prioritizing coffee in the morning and local bars/jazz clubs in the evening).
+* **Feeling Lucky Vibe**: A surprise theme selector that constructs itineraries with speakeasies, oddities museums, and architectural landmarks.
+* **Round-Trip Geometry Sync**: Locks destination coordinates to the starting location to generate circular walking loops.
+
+### 2. Active Navigation & Walk Mode
+* **Live GPS Walk Mode**: Real-time position tracking that highlights active timeline cards when within 150 meters of a waypoint and auto-advances stop durations.
+* **Spontaneous "Vibe Detours"**: Tap the glowing detour controller or shake your phone to discover and pivot to trending local spots (vintage records, matcha cafes, historic views) within 500m.
+
+### 3. Pacing, Safety & Constraints
+* **Accessibility (Incline Grade Safety)**: Samples elevations along walking leg polylines using the Google Elevation API to detect and filter out routes with steep slopes (>8% grade).
+* **Budget Limits & Cost Estimation**: Filters waypoints to adhere to per-person budget limits and provides real-time spend estimations per stop.
+* **Walk & Dwell Breakdown Indicators**: Splits route timelines into clear transit walking vs. stop dwell duration pills (e.g. `🚶 X min walking` and `☕ Y min at stops`).
+
+### 4. Customization & Gamification
+* **Dynamic Waypoint Swapping**: Replace individual stops inline. Queries local candidates and uses GPT-4o to rewrite descriptions and recalculate leg geometries.
+* **Neighborhood Passport**: Gamified database logging of visited neighborhoods, vibe profiles, and completed stops to update user passport progress.
+
+### 5. Portability & Synchronization
+* **Add to Calendar (ICS)**: Downloads calendar events preloaded with stop coordinates, ratings, stay durations, and navigation links.
+* **Shareable Routes**: Persists generated itineraries with short links (`/r/abc123`) for cross-user synchronization.
+* **PWA Installable**: Supports Progressive Web App deployment on iOS/Android for a full-screen, app-like experience.
 
 
 ---
