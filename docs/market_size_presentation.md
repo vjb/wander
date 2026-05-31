@@ -67,7 +67,7 @@
   * *Deficit*: High rate of venue hallucination, lack of real-world geocoding coordinates, incorrect transit times.
 * **wander (Geolocated Curation)**:
   * *Focus*: Real-world API geocoding + RAG selection + Directions validation.
-  * *Strengths*: Operates at the intersection of narrative curation and structural accuracy, with interactive shake-to-detour triggers, slope safety filters, and LLM-guided budget limits.
+  * *Strengths*: Operates at the intersection of narrative curation and structural accuracy, with interactive shake-to-detour triggers, slope safety filters, LLM-guided budget limits, and walk/dwell pacing breakdown indicators.
   * *Deficit*: None.
 
 ---

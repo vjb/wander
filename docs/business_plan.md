@@ -52,6 +52,10 @@ To transition from a costing utility to a profitable business, `wander` operates
 * **Pricing**: $4.99 / month or $29.99 / year.
 * **Free Tier Limits**: 3 route generations per day, default vibes only, standard Apple/Google Maps handoff.
 * **Premium Features**:
+  * **Spontaneous Vibe Detours**: Shake-to-detour triggers or glows to discover local gems via Foursquare and OpenTripMap on the fly.
+  * **Incline/Slope Safety Filter**: Avoid steep hill walking (uses Google Elevation API to filter out >8% grade routes).
+  * **LLM-Guided Budget Limits**: Define strict spending caps per stop with real-time budget boundary validation.
+  * **Walk/Dwell Breakdown Pills**: Visual indicators separating transit walking time from dwell times at stops.
   * Unlimited custom vibe prompt descriptions.
   * Unlimited stop-swapping with natural language refinement.
   * Wearable export (syncing route maps directly to Apple Watch, Garmin, and Fitbit).

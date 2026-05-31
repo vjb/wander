@@ -33,6 +33,7 @@ wander is a lightweight, high-performance web and mobile application that dynami
 * **Accessibility & Incline Check**: Evaluates walking leg polylines using the Google Elevation API, automatically skipping routes with steep slopes (>8% grade) when slope avoidance is enabled.
 * **Budget Control**: Restricts waypoint selections and estimates individual stop spend to strictly adhere to the user's defined maximum budget cap.
 * **Dynamic Swapping & Spontaneous Detours**: Users can swap stops inline or trigger spontaneous "Vibe Detours" on the fly using a glowing detour button or an interactive device shake gesture while walking in Live Walk Mode.
+* **Walk/Dwell breakdown pills**: Clear visual splits separating actual walking minutes from stops' dwell times (e.g. `🚶 67 min walking`, `☕ 160 min at stops`), giving users detailed pacing transparency.
 * **Native Navigation Handoff**: Exports multi-stop walking directions directly to Google Maps or Apple Maps with geocoded coordinates, avoiding in-app navigation complexity while safely handling third-party landmarks.
 
 ---

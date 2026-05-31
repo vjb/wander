@@ -1779,11 +1779,13 @@ class WaypointSwapRequest(BaseModel):
 
 
 class VibeDetourRequest(BaseModel):
-    current_lat: float
-    current_lng: float
+    model_config = {"populate_by_name": True}
+    
+    current_lat: float = Field(..., validation_alias="lat")
+    current_lng: float = Field(..., validation_alias="lng")
     vibe: str
-    remaining_budget_usd: Optional[int] = 50
-    exclude_place_ids: Optional[List[str]] = []
+    remaining_budget_usd: Optional[int] = Field(50, validation_alias="max_budget_usd")
+    exclude_place_ids: Optional[List[str]] = Field([], validation_alias="current_itinerary_place_ids")
 
 
 class DetourWaypointLLM(BaseModel):
