@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { motion, AnimatePresence, type Variants } from "framer-motion";
 import {
   MapPin,
@@ -28,6 +28,7 @@ import {
   Trash2,
   Lock,
   Wand2,
+  ChevronDown,
 } from "lucide-react";
 
 import { WanderMap } from "./components/WanderMap";
@@ -189,6 +190,105 @@ const cardVariants: Variants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.25, 0.1, 0.25, 1] } },
 };
 
+// ── Confetti Particle System ──────────────────────────────────────────────────
+
+function ConfettiCanvas({ active }: { active: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    if (!active || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let animationFrameId: number;
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const colors = ["#8ba88e", "#e5d3b3", "#d6dfd0", "#c2b280", "#e5e7eb"];
+    interface Particle {
+      x: number;
+      y: number;
+      size: number;
+      color: string;
+      speedX: number;
+      speedY: number;
+      rotation: number;
+      rotationSpeed: number;
+    }
+
+    const particles: Particle[] = [];
+    const particleCount = 120;
+
+    for (let i = 0; i < particleCount; i++) {
+      const fromLeft = Math.random() > 0.5;
+      particles.push({
+        x: fromLeft ? 0 : canvas.width,
+        y: canvas.height * 0.8,
+        size: Math.random() * 8 + 4,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        speedX: (fromLeft ? 1 : -1) * (Math.random() * 15 + 5),
+        speedY: -(Math.random() * 20 + 10),
+        rotation: Math.random() * 360,
+        rotationSpeed: Math.random() * 10 - 5
+      });
+    }
+
+    let frames = 0;
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      let alive = false;
+
+      particles.forEach((p) => {
+        p.x += p.speedX;
+        p.y += p.speedY;
+        p.speedY += 0.4;
+        p.speedX *= 0.98;
+        p.rotation += p.rotationSpeed;
+
+        if (p.y < canvas.height && p.x > -50 && p.x < canvas.width + 50) {
+          alive = true;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate((p.rotation * Math.PI) / 180);
+          ctx.fillStyle = p.color;
+          ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+          ctx.restore();
+        }
+      });
+
+      frames++;
+      if (alive && frames < 180) {
+        animationFrameId = requestAnimationFrame(animate);
+      } else {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    };
+
+    animate();
+
+    const handleResize = () => {
+      if (canvasRef.current) {
+        canvasRef.current.width = window.innerWidth;
+        canvasRef.current.height = window.innerHeight;
+      }
+    };
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [active]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="fixed inset-0 w-full h-full pointer-events-none z-50"
+    />
+  );
+}
+
 // ── Background ────────────────────────────────────────────────────────────────
 
 function BackgroundOrbs() {
@@ -213,6 +313,8 @@ function BackgroundOrbs() {
 function InputScreen({
   start, setStart, end, setEnd,
   timeBudget, setTimeBudget,
+  inputMode, setInputMode,
+  stepGoal, setStepGoal,
   vibe, setVibe,
   onWander, error,
   handleLocate, isLocating,
@@ -231,6 +333,8 @@ function InputScreen({
   start: string; setStart: (v: string) => void;
   end: string; setEnd: (v: string) => void;
   timeBudget: number; setTimeBudget: (v: number) => void;
+  inputMode: "time" | "steps"; setInputMode: (v: "time" | "steps") => void;
+  stepGoal: number; setStepGoal: (v: number) => void;
   vibe: VibeId | ""; setVibe: (v: VibeId | "") => void;
   onWander: () => void;
   error: string | null;
@@ -255,6 +359,24 @@ function InputScreen({
 }) {
   const effectiveEnd = isRoundTrip ? start : end;
   const canWander = start.trim().length > 0 && effectiveEnd.trim().length > 0 && (vibe !== "" || customVibe.trim().length > 0);
+
+  const vibePlaceholder = useMemo(() => {
+    const base = "or, describe your own vibe... e.g. ";
+    if (!advisorData?.weather_advice) {
+      return base + "'spicy noodles, vintage clothes, and a quiet place to read'";
+    }
+    const advice = advisorData.weather_advice.toLowerCase();
+    if (advice.includes("rain") || advice.includes("precipitation") || advice.includes("shower") || advice.includes("snow")) {
+      return base + "'cozy record cafes, covered book markets, and indie cinema'";
+    }
+    if (advice.includes("cold") || advice.includes("chill")) {
+      return base + "'warm ramen shops, steaming coffee, and museum galleries'";
+    }
+    if (advice.includes("hot") || advice.includes("warm") || advice.includes("clear") || advice.includes("sun")) {
+      return base + "'rooftop bars, park bench reading, and waterfront ice cream'";
+    }
+    return base + "'local record stores, hidden gardens, and quiet coffee shops'";
+  }, [advisorData?.weather_advice]);
 
   const formatTime = (mins: number) => {
     if (mins < 60) return `${mins} min`;
@@ -400,29 +522,85 @@ function InputScreen({
 
 
 
-          {/* Time Budget */}
+          {/* Slider Mode Toggle */}
+          <div className="flex gap-2.5 mb-5 p-1 rounded-xl bg-[#f4f4f5]/3 border border-[#f4f4f5]/6">
+            <button
+              type="button"
+              onClick={() => setInputMode("time")}
+              className={`flex-1 py-1.5 rounded-lg text-center text-[11px] font-semibold tracking-wide transition-all ${
+                inputMode === "time"
+                  ? "bg-[#8ba88e]/18 text-[#8ba88e] border border-[#8ba88e]/30"
+                  : "text-[#f4f4f5]/40 hover:text-[#f4f4f5]/70 cursor-pointer"
+              }`}
+              style={{ fontFamily: "var(--font-inter)" }}
+            >
+              time budget
+            </button>
+            <button
+              type="button"
+              onClick={() => setInputMode("steps")}
+              className={`flex-1 py-1.5 rounded-lg text-center text-[11px] font-semibold tracking-wide transition-all ${
+                inputMode === "steps"
+                  ? "bg-[#8ba88e]/18 text-[#8ba88e] border border-[#8ba88e]/30"
+                  : "text-[#f4f4f5]/40 hover:text-[#f4f4f5]/70 cursor-pointer"
+              }`}
+              style={{ fontFamily: "var(--font-inter)" }}
+            >
+              step goal
+            </button>
+          </div>
+
+          {/* Time Budget or Step Goal Slider */}
           <div className="mb-8">
-            <div className="flex items-center justify-between mb-4">
-              <label htmlFor="time-budget" className="flex items-center gap-2 text-[#f4f4f5]/40 text-[12px] font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-inter)" }}>
-                <Clock className="w-3.5 h-3.5" strokeWidth={1.5} />
-                time to wander
-              </label>
-              <span className="text-[#e5d3b3] text-sm font-medium" style={{ fontFamily: "var(--font-inter)" }}>
-                {formatTime(timeBudget)}
-              </span>
-            </div>
-            <input
-              id="time-budget"
-              type="range"
-              min={30}
-              max={240}
-              step={15}
-              value={timeBudget}
-              onChange={(e) => setTimeBudget(Number(e.target.value))}
-            />
-            <div className="flex justify-between text-[#f4f4f5]/20 text-[11px] mt-2.5 font-light" style={{ fontFamily: "var(--font-inter)" }}>
-              <span>30 min</span><span>2 hours</span><span>4 hours</span>
-            </div>
+            {inputMode === "time" ? (
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <label htmlFor="time-budget" className="flex items-center gap-2 text-[#f4f4f5]/40 text-[12px] font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-inter)" }}>
+                    <Clock className="w-3.5 h-3.5" strokeWidth={1.5} />
+                    time to wander
+                  </label>
+                  <span className="text-[#e5d3b3] text-sm font-medium" style={{ fontFamily: "var(--font-inter)" }}>
+                    {formatTime(timeBudget)}
+                  </span>
+                </div>
+                <input
+                  id="time-budget"
+                  type="range"
+                  min={30}
+                  max={240}
+                  step={15}
+                  value={timeBudget}
+                  onChange={(e) => setTimeBudget(Number(e.target.value))}
+                />
+                <div className="flex justify-between text-[#f4f4f5]/20 text-[11px] mt-2.5 font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                  <span>30 min</span><span>2 hours</span><span>4 hours</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <label htmlFor="step-goal" className="flex items-center gap-2 text-[#f4f4f5]/40 text-[12px] font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-inter)" }}>
+                    <Footprints className="w-3.5 h-3.5 text-[#8ba88e]" strokeWidth={1.5} />
+                    target step goal
+                  </label>
+                  <span className="text-[#e5d3b3] text-sm font-medium" style={{ fontFamily: "var(--font-inter)" }}>
+                    {stepGoal.toLocaleString()} steps
+                  </span>
+                </div>
+                <input
+                  id="step-goal"
+                  type="range"
+                  min={3000}
+                  max={15000}
+                  step={1000}
+                  value={stepGoal}
+                  onChange={(e) => setStepGoal(Number(e.target.value))}
+                />
+                <div className="flex justify-between text-[#f4f4f5]/20 text-[11px] mt-2.5 font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                  <span>3k steps</span><span>9k steps</span><span>15k steps</span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Vibe Selector */}
@@ -478,7 +656,7 @@ function InputScreen({
             <div className="relative">
               <textarea
                 id="custom-vibe"
-                placeholder="or, describe your own vibe... e.g. 'spicy noodles, vintage clothes, and a quiet place to read'"
+                placeholder={vibePlaceholder}
                 value={customVibe}
                 onChange={(e) => {
                   setCustomVibe(e.target.value);
@@ -725,11 +903,28 @@ function WaypointCard({
   const [tipOpen, setTipOpen] = useState(false);
   const [swapMenuOpen, setSwapMenuOpen] = useState(false);
   const [customInput, setCustomInput] = useState("");
+  const [copied, setCopied] = useState(false);
 
-  const dwellPercent = Math.min(100, (dwellSeconds / 300) * 100);
+  useEffect(() => {
+    if (!swapMenuOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSwapMenuOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [swapMenuOpen]);
+
+  const targetSeconds = (waypoint.duration_mins || 30) * 60;
+  const dwellPercent = Math.min(100, (dwellSeconds / targetSeconds) * 100);
 
   return (
-    <motion.div variants={cardVariants}>
+    <motion.div
+      variants={cardVariants}
+      whileHover={{ y: -3 }}
+      transition={{ type: "spring", stiffness: 300, damping: 20 }}
+    >
       <div
         className={`glass-lighter rounded-2xl overflow-hidden relative transition-all duration-500 ${
           isVisited ? "opacity-50" : ""
@@ -833,13 +1028,28 @@ function WaypointCard({
               </span>
             )}
           </div>
-          <p
-            className="text-[#f4f4f5]/30 text-[12px] font-light mb-4 flex items-center gap-1.5"
+          <button
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(waypoint.address_hint);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              } catch (err) {
+                console.error("failed to copy address", err);
+              }
+            }}
+            className="text-[#f4f4f5]/30 hover:text-[#8ba88e] text-[12px] font-light mb-4 flex items-center gap-1.5 transition-colors cursor-pointer text-left focus:outline-none"
             style={{ fontFamily: "var(--font-inter)" }}
+            title="Click to copy address"
           >
             <MapPin className="w-3 h-3 shrink-0" strokeWidth={1.5} />
-            {waypoint.address_hint}
-          </p>
+            <span className="truncate">{waypoint.address_hint}</span>
+            {copied && (
+              <span className="text-[10px] text-[#8ba88e] font-medium ml-1 shrink-0">
+                (copied!)
+              </span>
+            )}
+          </button>
           <p
             className="text-[#f4f4f5]/65 text-[14px] font-light leading-relaxed mb-4"
             style={{ fontFamily: "var(--font-inter)" }}
@@ -1262,6 +1472,33 @@ export function RouteScreen({
 
   const [selectedIndex, setSelectedIndex] = useState(0);
   const activeRoute = routes[selectedIndex];
+  const [isIOS, setIsIOS] = useState(false);
+
+  useEffect(() => {
+    if (typeof navigator !== "undefined") {
+      setIsIOS(/iPad|iPhone|iPod/.test(navigator.userAgent));
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA"
+      ) {
+        return;
+      }
+      if (e.key === "1") {
+        if (routes[0]) setSelectedIndex(0);
+      } else if (e.key === "2") {
+        if (routes[1]) setSelectedIndex(1);
+      } else if (e.key === "3") {
+        if (routes[2]) setSelectedIndex(2);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [routes, setSelectedIndex]);
 
   useEffect(() => {
     if (!routes[selectedIndex]) {
@@ -1384,7 +1621,9 @@ export function RouteScreen({
         const data = await res.json();
         const url = `${window.location.origin}/r/${data.id}`;
         setShareUrl(url);
-        await navigator.clipboard.writeText(url);
+        const waypointNames = activeRoute.waypoints.map((w, idx) => `${idx + 1}. ${w.location_name}`).join(" -> ");
+        const shareText = `Wander Route: ${activeRoute.route_name}\nWaypoints: ${waypointNames}\nDuration: ${activeRoute.total_walking_time_mins} minutes total\nDetails: ${url}`;
+        await navigator.clipboard.writeText(shareText);
         setTimeout(() => setShareUrl(null), 3000);
       }
     } catch (e) {
@@ -1594,6 +1833,20 @@ export function RouteScreen({
                     style={{ fontFamily: "var(--font-inter)" }}
                   >
                     ⏱️ {totalLabel} total
+                  </span>
+                  <span
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/55 text-[11px] font-medium border border-[#f4f4f5]/10"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                    title="Estimated based on walking duration"
+                  >
+                    👣 {Math.round(walkingMins * 120).toLocaleString()} steps
+                  </span>
+                  <span
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/55 text-[11px] font-medium border border-[#f4f4f5]/10"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                    title="Estimated calories burned walking"
+                  >
+                    🔥 {Math.round(walkingMins * 4.5)} kcal
                   </span>
                 </>
               );
@@ -2022,6 +2275,25 @@ export function RouteScreen({
                 start wandering
                 <ExternalLink className="w-3.5 h-3.5 opacity-60" strokeWidth={2} />
               </motion.button>
+
+              {isIOS && (
+                <motion.button
+                  onClick={() => {
+                    const startLoc = encodeURIComponent(activeRoute.start_location || activeRoute.waypoints[0]?.location_name || "");
+                    const endLoc = encodeURIComponent(activeRoute.end_location || activeRoute.waypoints[activeRoute.waypoints.length - 1]?.location_name || "");
+                    const appleMapsLink = `https://maps.apple.com/?saddr=${startLoc}&daddr=${endLoc}&dirflg=w`;
+                    window.open(appleMapsLink, "_blank");
+                  }}
+                  whileHover={{ scale: 1.015 }}
+                  whileTap={{ scale: 0.985 }}
+                  transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                  className="px-4 py-4 rounded-2xl bg-[#f4f4f5]/5 border border-[#f4f4f5]/10 text-[#f4f4f5]/70 font-semibold text-[13px] tracking-wide hover:bg-[#f4f4f5]/10 transition-colors"
+                  style={{ fontFamily: "var(--font-inter)" }}
+                  title="Open Apple Maps walking directions"
+                >
+                  apple maps
+                </motion.button>
+              )}
             </div>
 
             <p className="text-center text-[#f4f4f5]/20 text-[11px] mt-2 font-light" style={{ fontFamily: "var(--font-inter)" }}>
@@ -2041,6 +2313,8 @@ export default function Home() {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [timeBudget, setTimeBudget] = useState(90);
+  const [inputMode, setInputMode] = useState<"time" | "steps">("time");
+  const [stepGoal, setStepGoal] = useState<number>(5000);
   const [vibe, setVibe] = useState<VibeId | "">("");
   const [customVibe, setCustomVibe] = useState("");
   const [isLocating, setIsLocating] = useState(false);
@@ -2056,6 +2330,8 @@ export default function Home() {
   const [companion, setCompanion] = useState<string>("solo");
   const [isRoundTrip, setIsRoundTrip] = useState(false);
   const [comfortMode, setComfortMode] = useState(false);
+
+  const effectiveTimeBudget = inputMode === "steps" ? Math.round(stepGoal / 120) + (numStops * 25) : timeBudget;
 
   // Keep end in sync when round-trip is active and start changes
   useEffect(() => {
@@ -2106,7 +2382,7 @@ export default function Home() {
           body: JSON.stringify({
             start_location: start,
             end_location: end,
-            time_budget_minutes: timeBudget,
+            time_budget_minutes: effectiveTimeBudget,
             num_stops: numStops,
             companion: companion,
             local_time: timeContext,
@@ -2139,16 +2415,16 @@ export default function Home() {
   const clientFeasibility = (() => {
     if (!advisorData) return null;
     const minRequired = numStops * 12;
-    if (timeBudget < minRequired) {
+    if (effectiveTimeBudget < minRequired) {
       return {
         status: "impossible" as const,
-        message: `impossible: ${timeBudget}m is too short for ${numStops} stops — try fewer stops or more time`,
+        message: `impossible: ${inputMode === "steps" ? `${stepGoal.toLocaleString()} steps` : `${effectiveTimeBudget}m`} is too short for ${numStops} stops — try fewer stops or more time`,
       };
     }
-    if (timeBudget < numStops * 18) {
+    if (effectiveTimeBudget < numStops * 18) {
       return {
         status: "tight" as const,
-        message: `tight: ${numStops} stops in ${timeBudget}m is doable but you'll need to keep moving`,
+        message: `tight: ${numStops} stops in ${inputMode === "steps" ? `${stepGoal.toLocaleString()} steps` : `${effectiveTimeBudget}m`} is doable but you'll need to keep moving`,
       };
     }
     return null; // use server message
@@ -2186,7 +2462,7 @@ export default function Home() {
         body: JSON.stringify({
           start_location: start,
           end_location: end,
-          time_budget_minutes: timeBudget,
+          time_budget_minutes: effectiveTimeBudget,
           vibe: selectedVibe,
           local_time: timeContext,
           num_stops: numStops,
@@ -2291,6 +2567,7 @@ export default function Home() {
   return (
     <main className={`min-h-screen bg-[#131316] text-[#f4f4f5] relative overflow-x-hidden${comfortMode ? ' comfort-mode' : ''}`}>
       <BackgroundOrbs />
+      <ConfettiCanvas active={screen === "route"} />
       <AnimatePresence mode="wait">
         {screen === "input" && (
           <InputScreen
@@ -2298,6 +2575,8 @@ export default function Home() {
             start={start} setStart={setStart}
             end={end} setEnd={setEnd}
             timeBudget={timeBudget} setTimeBudget={setTimeBudget}
+            inputMode={inputMode} setInputMode={setInputMode}
+            stepGoal={stepGoal} setStepGoal={setStepGoal}
             vibe={vibe} setVibe={setVibe}
             onWander={handleWander}
             error={error}
