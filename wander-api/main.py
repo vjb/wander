@@ -468,6 +468,8 @@ async def _places_search_text(query: str, lat: float, lng: float, radius_m: floa
                     ),
                 },
             )
+            if res.status_code != 200:
+                print(f"[PLACES API ERROR] status={res.status_code}, query={query}, response={res.text}")
             places = []
             for p in res.json().get("places", []):
                 # Build photo URL from first photo reference if available
@@ -494,7 +496,8 @@ async def _places_search_text(query: str, lat: float, lng: float, radius_m: floa
                     }
                 )
             return places
-    except Exception:
+    except Exception as e:
+        print(f"[PLACES EXCEPTION] query={query}, error={e}")
         return []
 
 
@@ -1352,6 +1355,253 @@ async def pacing_advisor(request: AdvisorRequest):
             density_badge_message="density-optimized suggestions active",
             weather_advice=None
         )
+
+
+class SwappedWaypointLLM(BaseModel):
+    selected_candidate_index: int = Field(..., description="Index (1-based) of the selected candidate from the list")
+    action_description: str = Field(..., description="Playful, lowercase action description tailored to this stop and the companion profile")
+    duration_mins: int = Field(..., description="Realistic duration in minutes (e.g. 15-45 mins depending on type)")
+    vibe_tag: str = Field(..., description="1-2 word micro-label e.g. 'Coffee Fix', 'Secret Garden'")
+    insider_tip: str = Field(..., description="Genuinely useful insider tip specific to this venue")
+
+
+class WaypointSwapRequest(BaseModel):
+    route: WanderRouteOptionV3
+    index: int
+    vibe: str
+    custom_refinement: Optional[str] = None
+
+
+def _call_openai_single_venue_swap_sync(
+    route: WanderRouteOptionV3,
+    index: int,
+    vibe: str,
+    custom_refinement: Optional[str],
+    candidates: List[Dict]
+) -> SwappedWaypointLLM:
+    candidate_lines = [
+        f"[{i+1}] {c['name']} | {c['address']} | "
+        f"{'⭐ ' + str(c['rating']) if c.get('rating') else 'no rating'} | "
+        f"{', '.join(c['types'][:2]) if c.get('types') else ''}"
+        for i, c in enumerate(candidates)
+    ]
+    candidates_context = "\n".join(candidate_lines)
+
+    # Context about the route
+    prev_wp = route.waypoints[index - 1].location_name if index > 0 else "Start Location"
+    next_wp = route.waypoints[index + 1].location_name if index + 1 < len(route.waypoints) else "End Location"
+    current_wp = route.waypoints[index].location_name
+
+    refinement_chunk = f"The user rejected the stop '{current_wp}' and wants a replacement stop instead."
+    if custom_refinement:
+        refinement_chunk += f" Specifically, they want: '{custom_refinement}'."
+
+    system_prompt = f"""You are wander — an urban experience curator.
+We need to replace exactly one stop in an existing itinerary.
+
+CURRENT ROUTE SUMMARY:
+- Route Name: {route.route_name}
+- Current Stops: {', '.join(w.location_name for w in route.waypoints)}
+- Swap Target Stop: '{current_wp}' at index {index} (between '{prev_wp}' and '{next_wp}')
+
+REPLACEMENT REQUEST:
+{refinement_chunk}
+
+CANDIDATE VENUES:
+{candidates_context}
+
+MISSION:
+Choose exactly ONE venue from the candidate list that is the best replacement for the target stop. It must fit between the previous stop ('{prev_wp}') and next stop ('{next_wp}') logistically and thematically.
+Return the index (1-based) of your choice and write a local, warm, lowercased action description and a specific insider tip.
+Do not use capital letters or end sentences with periods. Write like a local who has lived here 10 years."""
+
+    response = openai_client.beta.chat.completions.parse(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "Choose the best candidate and curate the waypoint details."}
+        ],
+        response_format=SwappedWaypointLLM,
+        temperature=0.7
+    )
+    return response.choices[0].message.parsed
+
+
+@app.post("/api/swap-waypoint", response_model=WanderRouteOptionV3)
+async def swap_waypoint(request: WaypointSwapRequest):
+    route = request.route
+    index = request.index
+    
+    if index < 0 or index >= len(route.waypoints):
+        raise HTTPException(status_code=400, detail="Invalid waypoint index")
+        
+    target_wp = route.waypoints[index]
+    # Geocode fallbacks
+    lat = target_wp.lat or route.start_lat or 40.7580
+    lng = target_wp.lng or route.start_lng or -73.9855
+    
+    # 1. Places queries centered at the target stop coordinate
+    if request.custom_refinement:
+        # Extract specific queries from custom text
+        queries = await _extract_custom_queries(request.custom_refinement)
+    else:
+        # Surprise me: pull from current vibe queries, or default
+        queries = VIBE_QUERIES.get(request.vibe, ["unique cafe", "pocket park", "community garden", "independent bookstore", "scenic spot"])
+        
+    # Search around target waypoint
+    results = await asyncio.gather(
+        *[_places_search_text(q, lat, lng, radius_m=1200.0) for q in queries],
+        return_exceptions=True
+    )
+    
+    # Filter out current route waypoints (dedup by name/place_id)
+    existing_place_ids = {wp.place_id for wp in route.waypoints if wp.place_id}
+    existing_names = {wp.location_name.lower().strip() for wp in route.waypoints}
+    
+    def process_batches(batches):
+        seen = set()
+        cands = []
+        for batch in batches:
+            if isinstance(batch, list):
+                for place in batch:
+                    pid = place.get("place_id") or place.get("name", "")
+                    if pid and pid not in seen and place.get("name"):
+                        seen.add(pid)
+                        # Check if already in route
+                        if pid in existing_place_ids:
+                            continue
+                        if place["name"].lower().strip() in existing_names:
+                            continue
+                        cands.append(place)
+        return cands
+
+    candidates = process_batches(results)
+    
+    # Fallback search if zero candidates found in 1.2km
+    if not candidates:
+        if request.custom_refinement:
+            # Custom refinement fallback: just expand the radius to 2500m
+            print(f"[SWAP FALLBACK] Retrying custom queries {queries} with radius=2500m")
+            fallback_results = await asyncio.gather(
+                *[_places_search_text(q, lat, lng, radius_m=2500.0) for q in queries],
+                return_exceptions=True
+            )
+            candidates = process_batches(fallback_results)
+        else:
+            # Surprise me fallback: broaden queries and expand radius to 2500m
+            broad_queries = []
+            for q in queries:
+                words = q.split()
+                if len(words) > 1:
+                    broad_queries.append(" ".join(words[:2]))
+                    broad_queries.append(words[-1])
+                else:
+                    broad_queries.append(q)
+            
+            vibe_generics = {
+                "Caffeinated & Cultured": ["cafe", "bookstore", "art gallery"],
+                "Green & Scenic": ["park", "garden", "waterfront"],
+                "Spontaneous & Social": ["bar", "food hall", "music venue"],
+                "Mental Break": ["park", "cafe", "bakery"],
+                "Off the Grid": ["historic landmark", "thrift store", "hidden garden"],
+                "Feeling Lucky": ["speakeasy", "museum", "oddities"]
+            }
+            generics = vibe_generics.get(request.vibe, ["cafe", "park", "scenic spot"])
+            broad_queries = list(set(broad_queries + generics))
+            
+            print(f"[SWAP FALLBACK] Retrying vibe queries {broad_queries} with radius=2500m")
+            fallback_results = await asyncio.gather(
+                *[_places_search_text(q, lat, lng, radius_m=2500.0) for q in broad_queries],
+                return_exceptions=True
+            )
+            candidates = process_batches(fallback_results)
+            
+    # Sort candidates by rating
+    candidates.sort(key=lambda x: x.get("rating") or 0, reverse=True)
+    candidates = candidates[:10]
+    
+    if not candidates:
+        raise HTTPException(status_code=404, detail="No suitable swap candidates found nearby. Try a different request.")
+        
+    # 2. Select replacement with LLM
+    loop = asyncio.get_event_loop()
+    try:
+        swapped_llm = await loop.run_in_executor(
+            None,
+            lambda: _call_openai_single_venue_swap_sync(
+                route,
+                index,
+                request.vibe,
+                request.custom_refinement,
+                candidates
+            )
+        )
+    except Exception as e:
+        print(f"Error calling swap LLM: {e}")
+        raise HTTPException(status_code=500, detail=f"LLM swap curation failed: {str(e)}")
+        
+    # Build replacement WaypointV3
+    idx = swapped_llm.selected_candidate_index - 1
+    if idx < 0 or idx >= len(candidates):
+        idx = 0
+        
+    selected_venue = candidates[idx]
+    
+    new_wp = WaypointV3(
+        order=index + 1,
+        location_name=selected_venue["name"].lower().rstrip('.'),
+        address_hint=selected_venue["address"],
+        google_rating=selected_venue.get("rating"),
+        photo_url=selected_venue.get("photo_url"),
+        place_id=selected_venue.get("place_id"),
+        lat=selected_venue.get("lat"),
+        lng=selected_venue.get("lng"),
+        action_description=swapped_llm.action_description.lower().rstrip('.'),
+        duration_mins=swapped_llm.duration_mins,
+        walk_to_next_mins=0,
+        vibe_tag=swapped_llm.vibe_tag.lower().rstrip('.'),
+        insider_tip=swapped_llm.insider_tip.lower().rstrip('.'),
+    )
+    
+    # 3. Swap in route waypoints list
+    route.waypoints[index] = new_wp
+    
+    # 4. Recompute walking times
+    directions_locations = []
+    if route.start_lat is not None and route.start_lng is not None:
+        directions_locations.append(f"{route.start_lat},{route.start_lng}")
+    else:
+        directions_locations.append(route.start_location)
+        
+    for wp in route.waypoints:
+        if wp.lat is not None and wp.lng is not None:
+            directions_locations.append(f"{wp.lat},{wp.lng}")
+        else:
+            directions_locations.append(wp.address_hint)
+            
+    if route.end_lat is not None and route.end_lng is not None:
+        directions_locations.append(f"{route.end_lat},{route.end_lng}")
+    else:
+        directions_locations.append(route.end_location)
+        
+    walk_times = await get_walking_times(directions_locations)
+    
+    route.initial_walk_mins = walk_times[0] if walk_times else 0
+    for i, wp_obj in enumerate(route.waypoints):
+        wp_obj.walk_to_next_mins = walk_times[i + 1] if i + 1 < len(walk_times) else 0
+        
+    # Recalculate total time
+    route.total_walking_time_mins = sum(w.duration_mins + w.walk_to_next_mins for w in route.waypoints) + route.initial_walk_mins
+    
+    # Update navigation deep link
+    route.navigation_deep_link = build_maps_deep_link(
+        f"{route.start_lat},{route.start_lng}" if (route.start_lat is not None) else route.start_location,
+        f"{route.end_lat},{route.end_lng}" if (route.end_lat is not None) else route.end_location,
+        [f"{w.lat},{w.lng}" if (w.lat is not None and w.lng is not None) else w.address_hint for w in route.waypoints],
+        [w.place_id for w in route.waypoints if w.place_id],
+    )
+    
+    return route
 
 
 

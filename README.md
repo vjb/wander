@@ -32,7 +32,7 @@ wander accepts a starting location, an ending location, a time budget, and a des
 
 **3. Get three routes, instantly** — wander geocodes your inputs, checks live weather, sweeps the Google Places API along your corridor, and streams three distinct themed walking routes via SSE. Route 1 appears first; Routes 2 and 3 load in the background.
 
-**4. Pick a route and explore** — each stop has real Google ratings, venue photos, curated insider tips, a Street View link, and accurate walk times between stops. Tap **Start Wandering** to open the full itinerary in Google Maps for turn-by-turn navigation.
+**4. Pick a route and explore** — each stop has real Google ratings, venue photos, curated insider tips, a Street View link, and accurate walk times between stops. Tap **swap stop** to swap any waypoint on the fly, or tap **Start Wandering** to open the full itinerary in Google Maps for turn-by-turn navigation.
 
 <div align="center">
   <img src="assets/crop-04-route.png" width="660" alt="Three routes found — espresso & art stroll selected with stop timeline" />
@@ -52,6 +52,7 @@ The stop timeline shows real venue photos, ratings, dwell times, and walk legs b
 
 * ✨ **AI-Suggested wanders** — time-of-day-aware preset wanders generated from your start location. One tap applies vibe, time budget, stops, and companion.
 * 🧭 **Live Walk Mode** — real-time GPS proximity tracking. Stops glow when you're within 150m. Dwell 5+ minutes and the next stop auto-advances. Shows accurate remaining time including walking legs.
+* 🪄 **Stop Customization & Swapping** — don't like a stop? Tap **swap stop** to trigger a "Surprise Me" quick-swap (based on the current vibe) or enter a custom prompt (e.g. *"bookstore"* or *"bakery"*) to swap that specific stop. wander automatically finds candidates, queries GPT-4o to select and curate the details, and recomputes walking legs and navigation links.
 * 🗺️ **Neighborhood Passport** — a personal stamp book of every neighborhood, vibe, and stop you've explored. Works even on shared route links.
 * 🔁 **Loop & Round-Trip Sync** — tap `🔁` to lock end = start. Perfect for hotel/office loops.
 * 🎭 **Zero-Hallucination RAG** — every stop is sourced from the Google Places API. The AI cannot invent venues.

@@ -27,6 +27,7 @@ import {
   X,
   Trash2,
   Lock,
+  Wand2,
 } from "lucide-react";
 
 import { WanderMap } from "./components/WanderMap";
@@ -708,14 +709,22 @@ function WaypointCard({
   isVisited = false,
   dwellSeconds = 0,
   onManualCheckIn,
+  vibe,
+  onSwapWaypoint,
+  isSwapping = false,
 }: {
   waypoint: WaypointV3;
   isNearby?: boolean;
   isVisited?: boolean;
   dwellSeconds?: number;
   onManualCheckIn?: () => void;
+  vibe: VibeId | "";
+  onSwapWaypoint?: (index: number, customRefinement?: string) => Promise<void>;
+  isSwapping?: boolean;
 }) {
   const [tipOpen, setTipOpen] = useState(false);
+  const [swapMenuOpen, setSwapMenuOpen] = useState(false);
+  const [customInput, setCustomInput] = useState("");
 
   const dwellPercent = Math.min(100, (dwellSeconds / 300) * 100);
 
@@ -894,6 +903,16 @@ function WaypointCard({
                    Street View
                  </a>
               )}
+              {onSwapWaypoint && !isVisited && (
+                <button
+                  onClick={() => setSwapMenuOpen((o) => !o)}
+                  className={`flex items-center gap-1.5 text-[12px] font-medium transition-colors ${swapMenuOpen ? 'text-[#8ba88e]' : 'text-[#e5d3b3]/50 hover:text-[#e5d3b3]/80'}`}
+                  style={{ fontFamily: "var(--font-inter)" }}
+                >
+                  <Wand2 className="w-3.5 h-3.5" strokeWidth={1.5} />
+                  swap stop
+                </button>
+              )}
             </div>
             <button
               id={`tip-toggle-${waypoint.order}`}
@@ -925,7 +944,83 @@ function WaypointCard({
               </motion.div>
             )}
           </AnimatePresence>
+
+          <AnimatePresence>
+            {swapMenuOpen && !isVisited && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                animate={{ opacity: 1, height: "auto", marginTop: 12 }}
+                exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                transition={{ duration: 0.3, ease: "easeInOut" }}
+                className="overflow-hidden border-t border-[#e5d3b3]/8 pt-3 mt-3 flex flex-col gap-2.5"
+              >
+                <p className="text-[#e5d3b3]/45 text-[11px] font-medium tracking-wide lowercase" style={{ fontFamily: "var(--font-inter)" }}>
+                  swap this stop for something else
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      setSwapMenuOpen(false);
+                      if (onSwapWaypoint) await onSwapWaypoint(waypoint.order - 1);
+                    }}
+                    className="flex-1 py-1.5 rounded-xl bg-[#e5d3b3]/10 border border-[#e5d3b3]/15 text-[#e5d3b3]/80 hover:bg-[#e5d3b3]/18 transition-all flex items-center justify-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    surprise me
+                  </button>
+                </div>
+                <div className="relative flex items-center">
+                  <input
+                    type="text"
+                    placeholder="what are you in the mood for instead?..."
+                    value={customInput}
+                    onChange={(e) => setCustomInput(e.target.value)}
+                    className="w-full bg-[#131316]/50 border border-[#e5d3b3]/15 rounded-xl py-2 pl-3 pr-10 text-[13px] text-[#f4f4f5] placeholder-[#f4f4f5]/30 focus:outline-none focus:border-[#8ba88e]/40 transition-colors font-light"
+                    style={{ fontFamily: "var(--font-inter)" }}
+                    onKeyDown={async (e) => {
+                      if (e.key === "Enter" && customInput.trim()) {
+                        setSwapMenuOpen(false);
+                        const val = customInput;
+                        setCustomInput("");
+                        if (onSwapWaypoint) await onSwapWaypoint(waypoint.order - 1, val);
+                      }
+                    }}
+                  />
+                  <button
+                    disabled={!customInput.trim()}
+                    onClick={async () => {
+                      setSwapMenuOpen(false);
+                      const val = customInput;
+                      setCustomInput("");
+                      if (onSwapWaypoint) await onSwapWaypoint(waypoint.order - 1, val);
+                    }}
+                    className="absolute right-2 p-1.5 rounded-lg text-[#8ba88e]/80 hover:text-[#8ba88e] disabled:opacity-30 transition-opacity"
+                  >
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
+
+        {/* Swapping/loading overlay */}
+        <AnimatePresence>
+          {isSwapping && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-[#131316]/75 backdrop-blur-md z-20 flex flex-col items-center justify-center gap-3"
+            >
+              <div className="w-5 h-5 rounded-full border-2 border-[#8ba88e]/30 border-t-[#8ba88e] animate-spin" />
+              <span className="text-[12px] text-[#8ba88e] font-medium tracking-wide lowercase" style={{ fontFamily: "var(--font-inter)" }}>
+                swapping stop...
+              </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </motion.div>
   );
@@ -1156,17 +1251,59 @@ export function RouteScreen({
   addPassportStamp?: (entry: PassportEntry) => void;
   comfortMode?: boolean;
 }) {
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const activeRoute = data.routes[selectedIndex];
+  const [routes, setRoutes] = useState<WanderRouteOptionV3[]>(data.routes || []);
+  const [swappingIndex, setSwappingIndex] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!data.routes[selectedIndex]) {
-      const firstAvailableIdx = data.routes.findIndex(r => !!r);
+    if (data?.routes) {
+      setRoutes(data.routes);
+    }
+  }, [data?.routes]);
+
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const activeRoute = routes[selectedIndex];
+
+  useEffect(() => {
+    if (!routes[selectedIndex]) {
+      const firstAvailableIdx = routes.findIndex(r => !!r);
       if (firstAvailableIdx !== -1) {
         setSelectedIndex(firstAvailableIdx);
       }
     }
-  }, [data.routes, selectedIndex]);
+  }, [routes, selectedIndex]);
+
+  const handleSwapWaypoint = async (idx: number, customRefinement?: string) => {
+    if (!activeRoute) return;
+    setSwappingIndex(idx);
+    try {
+      const res = await fetch("/api/swap-waypoint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          route: activeRoute,
+          index: idx,
+          vibe: vibe || "custom",
+          custom_refinement: customRefinement || null
+        })
+      });
+      if (res.ok) {
+        const updatedRoute = await res.json();
+        setRoutes((prevRoutes) => {
+          const next = [...prevRoutes];
+          next[selectedIndex] = updatedRoute;
+          return next;
+        });
+      } else {
+        const err = await res.json();
+        alert(err.detail || "Failed to swap waypoint");
+      }
+    } catch (err) {
+      console.error("Error swapping waypoint:", err);
+      alert("An error occurred while swapping the waypoint.");
+    } finally {
+      setSwappingIndex(null);
+    }
+  };
 
   const [isSharing, setIsSharing] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
@@ -1382,7 +1519,7 @@ export function RouteScreen({
           >
             {/* c) Tabs with stronger active/inactive affordance */}
             {[0, 1, 2].map((i) => {
-              const route = data.routes[i];
+              const route = routes[i];
               const isLoading = !route;
               const tabTitle = route ? route.route_name : `route ${i + 1}…`;
               const isSelected = selectedIndex === i;
@@ -1563,6 +1700,9 @@ export function RouteScreen({
                       isVisited={checkedInStops.has(i)}
                       dwellSeconds={dwellSeconds.get(i) ?? 0}
                       onManualCheckIn={walkModeActive && !checkedInStops.has(i) ? () => manualCheckIn(i, handleCheckIn) : undefined}
+                      vibe={vibe}
+                      onSwapWaypoint={handleSwapWaypoint}
+                      isSwapping={swappingIndex === i}
                     />
                   </div>
 
