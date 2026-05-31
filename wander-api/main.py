@@ -167,6 +167,7 @@ class WaypointV3(BaseModel):
     walk_to_next_mins: int = 0
     vibe_tag: str
     insider_tip: str
+    estimated_cost_usd: Optional[int] = 0
 
 
 class WanderRouteOptionV3(BaseModel):
@@ -182,6 +183,7 @@ class WanderRouteOptionV3(BaseModel):
     end_lng: Optional[float] = None
     waypoints: List[WaypointV3]
     navigation_deep_link: str
+    estimated_total_cost_usd: Optional[int] = 0
 
 
 
@@ -199,6 +201,8 @@ class RouteRequest(BaseModel):
     num_stops: Optional[int] = 3
     free_only: Optional[bool] = False
     companion: Optional[str] = "solo"
+    avoid_slopes: Optional[bool] = False
+    max_budget_usd: Optional[int] = 50
 
 
 class AdvisorRequest(BaseModel):
@@ -256,6 +260,10 @@ class SelectedWaypointLLM(BaseModel):
         ...,
         description="One specific local secret: the best seat, off-menu item, or perfect time of day to visit",
     )
+    estimated_cost_usd: int = Field(
+        ...,
+        description="Estimated cost in USD per person for this stop. Use 0 for free stops (parks, landmarks, free libraries). Use realistic values: coffee $5, wine/cocktail $15-$20, meal $20-$40.",
+    )
 
 
 class RouteOptionLLM(BaseModel):
@@ -269,6 +277,10 @@ class RouteOptionLLM(BaseModel):
         min_length=2,
         max_length=5,
         description="2–5 stops selected from the verified venue list, in geographic order",
+    )
+    estimated_total_cost_usd: int = Field(
+        ...,
+        description="The sum of estimated_cost_usd for all waypoints in this route.",
     )
 
 
@@ -556,18 +568,23 @@ async def fetch_candidate_venues(start_ll: Dict, end_ll: Optional[Dict], vibe: s
     return venues[:20]
 
 
-# ── Google Directions API ─────────────────────────────────────────────────────
+# ── Google Directions & Elevation API ──────────────────────────────────────────
 
-async def get_walking_times(addresses: List[str]) -> List[int]:
+async def get_route_legs_info(addresses: List[str]) -> List[Dict]:
     """
     Call Directions API between each consecutive pair of addresses in parallel.
-    Returns a list of walk_mins per stop (last stop is always 0).
-    Falls back to 8 min per leg on any error.
+    Returns a list of dicts, one for each leg:
+    {
+      "duration_mins": int,
+      "distance_m": int,
+      "polyline": str
+    }
+    For N addresses, returns N-1 leg dicts.
     """
     if len(addresses) < 2:
-        return [0] * len(addresses)
+        return []
 
-    async def _fetch_leg(client: httpx.AsyncClient, origin: str, destination: str) -> int:
+    async def _fetch_leg(client: httpx.AsyncClient, origin: str, destination: str) -> Dict:
         try:
             res = await client.get(
                 "https://maps.googleapis.com/maps/api/directions/json",
@@ -580,11 +597,27 @@ async def get_walking_times(addresses: List[str]) -> List[int]:
             )
             data = res.json()
             if data.get("status") == "OK":
-                secs = data["routes"][0]["legs"][0]["duration"]["value"]
-                return round(secs / 60)
-            return 8
+                route = data["routes"][0]
+                leg = route["legs"][0]
+                secs = leg["duration"]["value"]
+                dist = leg["distance"]["value"]
+                poly = route.get("overview_polyline", {}).get("points", "")
+                return {
+                    "duration_mins": round(secs / 60),
+                    "distance_m": dist,
+                    "polyline": poly
+                }
+            return {
+                "duration_mins": 8,
+                "distance_m": 600,
+                "polyline": ""
+            }
         except Exception:
-            return 8
+            return {
+                "duration_mins": 8,
+                "distance_m": 600,
+                "polyline": ""
+            }
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         tasks = [
@@ -593,12 +626,70 @@ async def get_walking_times(addresses: List[str]) -> List[int]:
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    walk_times: List[int] = [
-        r if isinstance(r, int) else 8
-        for r in results
-    ]
-    walk_times.append(0)  # last stop never walks to a next stop
+    legs: List[Dict] = []
+    for r in results:
+        if isinstance(r, dict):
+            legs.append(r)
+        else:
+            legs.append({
+                "duration_mins": 8,
+                "distance_m": 600,
+                "polyline": ""
+            })
+    return legs
+
+
+async def get_walking_times(addresses: List[str]) -> List[int]:
+    """
+    Call Directions API and return duration_mins list (last stop is always 0).
+    """
+    legs = await get_route_legs_info(addresses)
+    walk_times = [leg["duration_mins"] for leg in legs]
+    walk_times.append(0)
     return walk_times
+
+
+async def check_leg_incline_steep(client: httpx.AsyncClient, polyline: str, distance_m: float) -> bool:
+    """
+    Sample 10 points along the path using Google Elevation API and calculate slope.
+    Returns True if any consecutive slope exceeds 8% (0.08).
+    """
+    if not polyline or distance_m <= 0:
+        return False
+    try:
+        res = await client.get(
+            "https://maps.googleapis.com/maps/api/elevation/json",
+            params={
+                "path": f"enc:{polyline}",
+                "samples": "10",
+                "key": GOOGLE_KEY,
+            },
+        )
+        data = res.json()
+        if data.get("status") == "OK":
+            results = data.get("results", [])
+            if len(results) >= 2:
+                # distance between consecutive samples
+                # Since we asked for 10 samples, there are 9 intervals
+                d = distance_m / (len(results) - 1)
+                if d <= 0:
+                    return False
+                for i in range(len(results) - 1):
+                    el1 = results[i]["elevation"]
+                    el2 = results[i + 1]["elevation"]
+                    slope = abs(el2 - el1) / d
+                    if slope > 0.08:
+                        logger.warning(
+                            f"Steep leg detected: slope={slope:.4f} (> 0.08) "
+                            f"over interval={d:.1f}m (elevations: {el1:.1f}m to {el2:.1f}m)"
+                        )
+                        return True
+        else:
+            logger.warning(f"Elevation API error status: {data.get('status')}")
+    except Exception as e:
+        logger.error(f"Failed to check leg incline: {e}")
+    return False
+
 
 
 # ── Deep-link builder ─────────────────────────────────────────────────────────
@@ -726,6 +817,22 @@ def _call_openai_single_route_sync(
             "public parks, free museums on free-entry days, public plazas, public libraries, or stated free attractions.\n"
         )
 
+    budget_prompt_chunk = ""
+    if request.max_budget_usd is not None:
+        budget_limit = request.max_budget_usd
+        if budget_limit >= 150:
+            budget_prompt_chunk = (
+                "BUDGET CONSTRAINT: The user has set an UNLIMITED budget. Feel free to suggest premium venues "
+                "or high-end spots if appropriate for the vibe, but keep estimations realistic.\n"
+            )
+        else:
+            budget_prompt_chunk = (
+                f"BUDGET CONSTRAINT: The user has set a MAXIMUM budget of ${budget_limit} USD per person for the entire route.\n"
+                f"You MUST select stops such that the sum of estimated_cost_usd for all stops does NOT exceed ${budget_limit} USD.\n"
+                "To stay within budget, curate a mix of free stops (parks, galleries, free landmarks) and paid stops. "
+                "Do NOT recommend high-end/expensive venues if the budget is low. Be extremely conscious of cost allocation.\n"
+            )
+
     system_prompt = f"""You are wander — an urban experience curator with encyclopedic local knowledge.
 Your life isn't a chore; wander. Help the user feel that.
 
@@ -764,6 +871,7 @@ For reference, remaining time after walking ≈ {_per_stop_mins * _stops} min to
 {companion_prompt_chunk}
 {exclude_prompt_chunk}
 {free_prompt_chunk}
+{budget_prompt_chunk}
 
 STRICT RULES:
 1. Use ONLY venues from the list. Reference each by its [number] in venue_index. No invented stops.
@@ -787,6 +895,10 @@ Active vibe / custom request: {request.vibe}"""
             min_length=_stops,
             max_length=_stops,
             description=f"Exactly {_stops} stops selected from the verified venue list, in geographic order",
+        )
+        estimated_total_cost_usd: int = Field(
+            ...,
+            description="The sum of estimated_cost_usd for all waypoints in this route.",
         )
 
     response = openai_client.beta.chat.completions.parse(
@@ -849,6 +961,7 @@ async def _enrich_route(
                 walk_to_next_mins=0,  # filled below
                 vibe_tag=wp.vibe_tag.lower().rstrip('.'),
                 insider_tip=wp.insider_tip.lower().rstrip('.'),
+                estimated_cost_usd=wp.estimated_cost_usd,
             )
         )
 
@@ -870,11 +983,25 @@ async def _enrich_route(
     else:
         directions_locations.append(request.end_location)
 
-    walk_times = await get_walking_times(directions_locations)
+    legs_info = await get_route_legs_info(directions_locations)
     
-    initial_walk_mins = walk_times[0] if walk_times else 0
+    initial_walk_mins = legs_info[0]["duration_mins"] if legs_info else 0
     for i, wp_obj in enumerate(waypoints):
-        wp_obj.walk_to_next_mins = walk_times[i + 1] if i + 1 < len(walk_times) else 0
+        wp_obj.walk_to_next_mins = legs_info[i + 1]["duration_mins"] if i + 1 < len(legs_info) else 0
+
+    # If avoid_slopes is requested, check the elevation profile of all legs in parallel
+    if request.avoid_slopes:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            slope_tasks = [
+                check_leg_incline_steep(client, leg["polyline"], leg["distance_m"])
+                for leg in legs_info
+            ]
+            slope_results = await asyncio.gather(*slope_tasks, return_exceptions=True)
+        
+        for slope_res in slope_results:
+            if isinstance(slope_res, bool) and slope_res:
+                logger.warning(f"Slope reject: route '{raw_route.route_name}' discarded because it contains a steep leg (> 8% slope)")
+                raise ValueError("Route contains a leg with a steep incline (> 8% slope).")
 
     walking_only_mins = sum(w.walk_to_next_mins for w in waypoints) + initial_walk_mins
     total_time = sum(w.duration_mins + w.walk_to_next_mins for w in waypoints) + initial_walk_mins
@@ -895,6 +1022,8 @@ async def _enrich_route(
             f"(ratio {walk_ratio:.2f})"
         )
 
+    estimated_total_cost_usd = sum(w.estimated_cost_usd or 0 for w in waypoints)
+
     return WanderRouteOptionV3(
         route_name=raw_route.route_name.lower().rstrip('.'),
         theme_summary=raw_route.theme_summary.lower().rstrip('.'),
@@ -913,6 +1042,7 @@ async def _enrich_route(
             [f"{w.lat},{w.lng}" if (w.lat is not None and w.lng is not None) else w.address_hint for w in waypoints],
             [w.place_id for w in waypoints if w.place_id],
         ),
+        estimated_total_cost_usd=estimated_total_cost_usd,
     )
 
 
@@ -1394,6 +1524,7 @@ class SwappedWaypointLLM(BaseModel):
     duration_mins: int = Field(..., description="Realistic duration in minutes (e.g. 15-45 mins depending on type)")
     vibe_tag: str = Field(..., description="1-2 word micro-label e.g. 'Coffee Fix', 'Secret Garden'")
     insider_tip: str = Field(..., description="Genuinely useful insider tip specific to this venue")
+    estimated_cost_usd: int = Field(..., description="Estimated cost in USD per person for this stop. Use 0 for free stops.")
 
 
 class WaypointSwapRequest(BaseModel):
@@ -1401,6 +1532,7 @@ class WaypointSwapRequest(BaseModel):
     index: int
     vibe: str
     custom_refinement: Optional[str] = None
+    max_budget_usd: Optional[int] = 50
 
 
 def _call_openai_single_venue_swap_sync(
@@ -1408,7 +1540,8 @@ def _call_openai_single_venue_swap_sync(
     index: int,
     vibe: str,
     custom_refinement: Optional[str],
-    candidates: List[Dict]
+    candidates: List[Dict],
+    max_budget_usd: Optional[int] = 50
 ) -> SwappedWaypointLLM:
     candidate_lines = [
         f"[{i+1}] {c['name']} | {c['address']} | "
@@ -1427,6 +1560,20 @@ def _call_openai_single_venue_swap_sync(
     if custom_refinement:
         refinement_chunk += f" Specifically, they want: '{custom_refinement}'."
 
+    current_other_stops_cost = sum(
+        w.estimated_cost_usd or 0 for idx, w in enumerate(route.waypoints) if idx != index
+    )
+    remaining_budget = max(0, max_budget_usd - current_other_stops_cost) if max_budget_usd is not None and max_budget_usd < 150 else None
+
+    budget_chunk = ""
+    if remaining_budget is not None:
+        budget_chunk = (
+            f"BUDGET CONSTRAINT: The current route has a total budget constraint. "
+            f"The other stops already cost a total of ${current_other_stops_cost} USD. "
+            f"This replacement stop MUST have an estimated_cost_usd of at most ${remaining_budget} USD "
+            f"so that the overall route remains within the user's budget.\n"
+        )
+
     system_prompt = f"""You are wander — an urban experience curator.
 We need to replace exactly one stop in an existing itinerary.
 
@@ -1438,6 +1585,7 @@ CURRENT ROUTE SUMMARY:
 REPLACEMENT REQUEST:
 {refinement_chunk}
 
+{budget_chunk}
 CANDIDATE VENUES:
 {candidates_context}
 
@@ -1567,7 +1715,8 @@ async def swap_waypoint(request: WaypointSwapRequest):
                 index,
                 request.vibe,
                 request.custom_refinement,
-                candidates
+                candidates,
+                request.max_budget_usd
             )
         )
     except Exception as e:
@@ -1595,6 +1744,7 @@ async def swap_waypoint(request: WaypointSwapRequest):
         walk_to_next_mins=0,
         vibe_tag=swapped_llm.vibe_tag.lower().rstrip('.'),
         insider_tip=swapped_llm.insider_tip.lower().rstrip('.'),
+        estimated_cost_usd=swapped_llm.estimated_cost_usd,
     )
     
     # 3. Swap in route waypoints list
@@ -1627,6 +1777,9 @@ async def swap_waypoint(request: WaypointSwapRequest):
     # Recalculate total time
     route.total_walking_time_mins = sum(w.duration_mins + w.walk_to_next_mins for w in route.waypoints) + route.initial_walk_mins
     
+    # Recalculate route total cost
+    route.estimated_total_cost_usd = sum(w.estimated_cost_usd or 0 for w in route.waypoints)
+
     # Update navigation deep link
     route.navigation_deep_link = build_maps_deep_link(
         f"{route.start_lat},{route.start_lng}" if (route.start_lat is not None) else route.start_location,

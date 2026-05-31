@@ -20,6 +20,7 @@ interface WaypointV3 {
   place_id?: string | null;
   lat?: number | null;
   lng?: number | null;
+  estimated_cost_usd?: number;
 }
 
 interface WanderRouteOptionV3 {
@@ -35,6 +36,7 @@ interface WanderRouteOptionV3 {
   end_lng?: number | null;
   waypoints: WaypointV3[];
   navigation_deep_link: string;
+  estimated_total_cost_usd?: number;
 }
 
 interface WanderV3Response {

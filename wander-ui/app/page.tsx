@@ -57,6 +57,7 @@ interface WaypointV3 {
   place_id?: string | null;
   lat?: number | null;
   lng?: number | null;
+  estimated_cost_usd?: number;
 }
 
 interface WanderRouteOptionV3 {
@@ -72,6 +73,7 @@ interface WanderRouteOptionV3 {
   end_lng?: number | null;
   waypoints: WaypointV3[];
   navigation_deep_link: string;
+  estimated_total_cost_usd?: number;
 }
 
 interface WanderV3Response {
@@ -322,6 +324,8 @@ function InputScreen({
   deferredPrompt,
   numStops, setNumStops,
   freeOnly, setFreeOnly,
+  avoidSlopes, setAvoidSlopes,
+  maxBudget, setMaxBudget,
   advisorData, advisorLoading, clientFeasibility,
   companion, setCompanion,
   setHasManuallySetStops,
@@ -344,6 +348,8 @@ function InputScreen({
   deferredPrompt: any;
   numStops: number; setNumStops: (v: number) => void;
   freeOnly: boolean; setFreeOnly: (v: boolean) => void;
+  avoidSlopes: boolean; setAvoidSlopes: (v: boolean) => void;
+  maxBudget: number; setMaxBudget: (v: number) => void;
   advisorData: AdvisorResponse | null;
   advisorLoading: boolean;
   clientFeasibility: { status: "impossible" | "tight"; message: string } | null;
@@ -731,6 +737,53 @@ function InputScreen({
               </button>
             </div>
 
+            {/* Avoid Steep Slopes (Flat walks only) */}
+            <div className="flex items-center justify-between border-t border-[#f4f4f5]/6 pt-4 mt-4">
+              <span className="text-[#f4f4f5]/60 text-xs font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                avoid steep slopes (flat walks only)
+              </span>
+              <button
+                id="avoid-slopes-toggle"
+                type="button"
+                role="switch"
+                aria-checked={avoidSlopes}
+                onClick={() => setAvoidSlopes(!avoidSlopes)}
+                className={`w-10 h-6 rounded-full transition-colors duration-200 focus:outline-none flex items-center p-0.5 cursor-pointer ${
+                  avoidSlopes ? 'bg-[#8ba88e]' : 'bg-[#f4f4f5]/10'
+                }`}
+              >
+                <div
+                  className={`w-5 h-5 rounded-full bg-[#131316] shadow-md transform transition-transform duration-200 ${
+                    avoidSlopes ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Max Budget per Person */}
+            <div className="border-t border-[#f4f4f5]/6 pt-4 mt-4">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-[#f4f4f5]/60 text-xs font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                  max budget per person
+                </span>
+                <span className="text-[#e5d3b3] text-xs font-medium" style={{ fontFamily: "var(--font-inter)" }}>
+                  {maxBudget === 150 ? "unlimited" : `$${maxBudget}`}
+                </span>
+              </div>
+              <input
+                id="max-budget"
+                type="range"
+                min={10}
+                max={150}
+                step={5}
+                value={maxBudget}
+                onChange={(e) => setMaxBudget(Number(e.target.value))}
+              />
+              <div className="flex justify-between text-[#f4f4f5]/25 text-[10px] mt-1 font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                <span>$10</span><span>$50</span><span>$100</span><span>unlimited</span>
+              </div>
+            </div>
+
             {/* Companion Row */}
             <div className="border-t border-[#f4f4f5]/6 pt-4 mt-4">
               <span className="text-[#f4f4f5]/60 text-xs font-light block mb-3" style={{ fontFamily: "var(--font-inter)" }}>
@@ -1101,6 +1154,14 @@ function WaypointCard({
                 )}
                 {isVisited ? "visited" : `${waypoint.duration_mins} min`}
               </div>
+              {waypoint.estimated_cost_usd !== undefined && (
+                <div className="flex items-center gap-1 text-[#e5d3b3]/60 text-[12px] font-light" style={{ fontFamily: "var(--font-inter)" }}>
+                  <span>Est. spend:</span>
+                  <span className="font-medium text-[#e5d3b3]">
+                    {waypoint.estimated_cost_usd === 0 ? "Free" : `$${waypoint.estimated_cost_usd}`}
+                  </span>
+                </div>
+              )}
               {waypoint.lat && waypoint.lng && (
                  <a
                     href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${waypoint.lat},${waypoint.lng}`}
@@ -1452,6 +1513,7 @@ export function RouteScreen({
   weatherContext,
   addPassportStamp,
   comfortMode = false,
+  maxBudget = 50,
 }: {
   data: WanderV3Response;
   vibe: VibeId | "";
@@ -1460,6 +1522,7 @@ export function RouteScreen({
   weatherContext?: string | null;
   addPassportStamp?: (entry: PassportEntry) => void;
   comfortMode?: boolean;
+  maxBudget?: number;
 }) {
   const [routes, setRoutes] = useState<WanderRouteOptionV3[]>(data.routes || []);
   const [swappingIndex, setSwappingIndex] = useState<number | null>(null);
@@ -1520,7 +1583,8 @@ export function RouteScreen({
           route: activeRoute,
           index: idx,
           vibe: vibe || "custom",
-          custom_refinement: customRefinement || null
+          custom_refinement: customRefinement || null,
+          max_budget_usd: maxBudget
         })
       });
       if (res.ok) {
@@ -1622,7 +1686,10 @@ export function RouteScreen({
         const url = `${window.location.origin}/r/${data.id}`;
         setShareUrl(url);
         const waypointNames = activeRoute.waypoints.map((w, idx) => `${idx + 1}. ${w.location_name}`).join(" -> ");
-        const shareText = `Wander Route: ${activeRoute.route_name}\nWaypoints: ${waypointNames}\nDuration: ${activeRoute.total_walking_time_mins} minutes total\nDetails: ${url}`;
+        const costStr = activeRoute.estimated_total_cost_usd !== undefined
+          ? `\nEst. Spend: ${activeRoute.estimated_total_cost_usd === 0 ? "Free" : `$${activeRoute.estimated_total_cost_usd}`}`
+          : "";
+        const shareText = `Wander Route: ${activeRoute.route_name}\nWaypoints: ${waypointNames}\nDuration: ${activeRoute.total_walking_time_mins} minutes total${costStr}\nDetails: ${url}`;
         await navigator.clipboard.writeText(shareText);
         setTimeout(() => setShareUrl(null), 3000);
       }
@@ -1828,6 +1895,14 @@ export function RouteScreen({
                   >
                     ☕ {dwellMins} min at stops
                   </span>
+                  {activeRoute.estimated_total_cost_usd !== undefined && (
+                    <span
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#e2cc8f]/10 text-[#e2cc8f] text-[11px] font-medium border border-[#e2cc8f]/20"
+                      style={{ fontFamily: "var(--font-inter)" }}
+                    >
+                      💰 {activeRoute.estimated_total_cost_usd === 0 ? "Free" : `$${activeRoute.estimated_total_cost_usd} est. spend`}
+                    </span>
+                  )}
                   <span
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f4f4f5]/8 text-[#f4f4f5]/70 text-[11px] font-medium border border-[#f4f4f5]/15"
                     style={{ fontFamily: "var(--font-inter)" }}
@@ -2325,6 +2400,8 @@ export default function Home() {
   const [weatherContext, setWeatherContext] = useState<string | null>(null);
   const [numStops, setNumStops] = useState<number>(3);
   const [freeOnly, setFreeOnly] = useState<boolean>(false);
+  const [avoidSlopes, setAvoidSlopes] = useState<boolean>(false);
+  const [maxBudget, setMaxBudget] = useState<number>(50);
   const [advisorData, setAdvisorData] = useState<AdvisorResponse | null>(null);
   const [advisorLoading, setAdvisorLoading] = useState<boolean>(false);
   const [companion, setCompanion] = useState<string>("solo");
@@ -2490,7 +2567,9 @@ export default function Home() {
           local_time: timeContext,
           num_stops: numStops,
           free_only: freeOnly,
-          companion: companion
+          companion: companion,
+          avoid_slopes: avoidSlopes,
+          max_budget_usd: maxBudget
         }),
       });
 
@@ -2553,7 +2632,7 @@ export default function Home() {
       setError(err instanceof Error ? err.message : "Something went wrong");
       setScreen("input");
     }
-  }, [start, end, timeBudget, vibe, customVibe, numStops, freeOnly, companion]);
+  }, [start, end, timeBudget, vibe, customVibe, numStops, freeOnly, companion, avoidSlopes, maxBudget]);
 
   const handleReset = useCallback(() => {
     setRouteData(null);
@@ -2612,6 +2691,10 @@ export default function Home() {
             setNumStops={setNumStops}
             freeOnly={freeOnly}
             setFreeOnly={setFreeOnly}
+            avoidSlopes={avoidSlopes}
+            setAvoidSlopes={setAvoidSlopes}
+            maxBudget={maxBudget}
+            setMaxBudget={setMaxBudget}
             advisorData={advisorData}
             advisorLoading={advisorLoading}
             clientFeasibility={clientFeasibility}
@@ -2638,6 +2721,7 @@ export default function Home() {
             weatherContext={weatherContext}
             addPassportStamp={addStamp}
             comfortMode={comfortMode}
+            maxBudget={maxBudget}
           />
         )}
       </AnimatePresence>
