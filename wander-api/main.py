@@ -922,6 +922,105 @@ async def get_walking_times(addresses: List[str]) -> List[int]:
     return walk_times
 
 
+async def _optimize_waypoint_order(
+    start: Dict,  # {"lat": ..., "lng": ...}
+    end: Dict,
+    waypoints: List["WaypointV3"],
+) -> List["WaypointV3"]:
+    """
+    Reorder waypoints to minimise total walking time using Google Distance Matrix API.
+    For N stops (typically 3-5), brute-forces all N! permutations and picks the
+    ordering with the lowest cumulative walking duration.
+    Falls back to original order silently if API call fails.
+    """
+    from itertools import permutations as _permutations
+
+    # Only reorder if we have coords for every waypoint (otherwise can't measure distance)
+    geocoded = [wp for wp in waypoints if wp.lat is not None and wp.lng is not None]
+    if len(geocoded) != len(waypoints) or len(waypoints) < 2 or not GOOGLE_KEY:
+        return waypoints  # can't optimise without full coordinates
+
+    # Build origin / destination lists: start + all stops + end
+    all_points = (
+        [f"{start['lat']},{start['lng']}"]
+        + [f"{wp.lat},{wp.lng}" for wp in waypoints]
+        + [f"{end['lat']},{end['lng']}"]
+    )
+
+    # Google Distance Matrix: origins × destinations, walking mode
+    origins = "|".join(all_points)
+    destinations = origins  # square matrix
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            res = await client.get(
+                "https://maps.googleapis.com/maps/api/distancematrix/json",
+                params={
+                    "origins": origins,
+                    "destinations": destinations,
+                    "mode": "walking",
+                    "key": GOOGLE_KEY,
+                },
+            )
+            data = res.json()
+
+        if data.get("status") != "OK":
+            logger.warning(f"Distance Matrix non-OK status: {data.get('status')} — keeping original order")
+            return waypoints
+
+        rows = data.get("rows", [])
+        n_points = len(all_points)
+
+        # Build duration matrix (seconds), -1 means unavailable
+        dur: List[List[int]] = []
+        for row in rows:
+            dur.append([
+                el.get("duration", {}).get("value", 10**6)
+                if el.get("status") == "OK" else 10**6
+                for el in row.get("elements", [])
+            ])
+
+        # Index mapping: 0=start, 1..N=waypoints, N+1=end
+        n_wps = len(waypoints)
+        start_idx = 0
+        end_idx = n_wps + 1
+        wp_indices = list(range(1, n_wps + 1))
+
+        best_cost = 10**9
+        best_perm = tuple(wp_indices)
+
+        for perm in _permutations(wp_indices):
+            cost = dur[start_idx][perm[0]]
+            for a, b in zip(perm, perm[1:]):
+                cost += dur[a][b]
+            cost += dur[perm[-1]][end_idx]
+            if cost < best_cost:
+                best_cost = cost
+                best_perm = perm
+
+        # Reorder waypoints (best_perm contains 1-based point indices)
+        reordered = [waypoints[i - 1] for i in best_perm]
+
+        # Log improvement for monitoring
+        original_cost = (
+            dur[start_idx][wp_indices[0]]
+            + sum(dur[wp_indices[i]][wp_indices[i+1]] for i in range(n_wps - 1))
+            + dur[wp_indices[-1]][end_idx]
+        )
+        saved_secs = original_cost - best_cost
+        if saved_secs > 30:
+            logger.info(
+                f"Route optimiser: reordered {n_wps} stops, "
+                f"saved {saved_secs // 60}m {saved_secs % 60}s walking"
+            )
+
+        return reordered
+
+    except Exception as e:
+        logger.warning(f"Waypoint order optimisation failed (non-critical): {e}")
+        return waypoints
+
+
 async def check_leg_incline_steep(client: httpx.AsyncClient, polyline: str, distance_m: float) -> bool:
     """
     Sample 10 points along the path using Google Elevation API and calculate slope.
@@ -1320,6 +1419,13 @@ async def _enrich_route(
                 estimated_cost_usd=wp.estimated_cost_usd,
             )
         )
+
+    # ── Optimise waypoint order via Distance Matrix (minimise total walking) ──
+    if start_ll and end_ll and len(waypoints) >= 2:
+        waypoints = await _optimize_waypoint_order(start_ll, end_ll, waypoints)
+        # Re-number after reorder
+        for i, wp in enumerate(waypoints):
+            wp.order = i + 1
 
     # Real walking times from Directions API using coordinates to avoid mismatched text addresses
     directions_locations = []
