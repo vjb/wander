@@ -1,5 +1,9 @@
 # wander
 
+![wander banner](assets/banner.png)
+
+> *Your life isn't a chore; wander.*
+
 A multi-stop walking route planner that generates three distinct themed itineraries between a starting and ending coordinate. Designed for local navigation, wander queries location APIs to construct structured paths with detailed venue metadata.
 
 <div align="center">
