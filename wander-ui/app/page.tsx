@@ -1144,51 +1144,54 @@ function WaypointCard({
             </div>
           )}
 
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-1.5 text-[#e5d3b3]/60 text-[12px] font-light" style={{ fontFamily: "var(--font-inter)" }}>
-                {isVisited ? (
-                  <CheckCircle2 className="w-3.5 h-3.5 text-[#8ba88e]" strokeWidth={1.5} />
-                ) : (
-                  <Timer className="w-3.5 h-3.5" strokeWidth={1.5} />
-                )}
-                {isVisited ? "visited" : `${waypoint.duration_mins} min`}
-              </div>
-              {waypoint.estimated_cost_usd !== undefined && (
-                <div className="flex items-center gap-1 text-[#e5d3b3]/60 text-[12px] font-light" style={{ fontFamily: "var(--font-inter)" }}>
-                  <span>Est. spend:</span>
-                  <span className="font-medium text-[#e5d3b3]">
-                    {waypoint.estimated_cost_usd === 0 ? "Free" : `$${waypoint.estimated_cost_usd}`}
-                  </span>
-                </div>
+          {/* Metadata Row */}
+          <div className="flex items-center gap-6 text-[12px] text-[#e5d3b3]/60 mb-3 font-light" style={{ fontFamily: "var(--font-inter)" }}>
+            <div className="flex items-center gap-1 whitespace-nowrap">
+              {isVisited ? (
+                <CheckCircle2 className="w-3.5 h-3.5 text-[#8ba88e]" strokeWidth={1.5} />
+              ) : (
+                <Timer className="w-3.5 h-3.5" strokeWidth={1.5} />
               )}
-              {waypoint.lat && waypoint.lng && (
-                 <a
-                    href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${waypoint.lat},${waypoint.lng}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 text-[#e5d3b3]/50 hover:text-[#e5d3b3]/80 text-[12px] font-medium transition-colors"
-                    style={{ fontFamily: "var(--font-inter)" }}
-                 >
-                   <MapPin className="w-3.5 h-3.5" strokeWidth={1.5} />
-                   Street View
-                 </a>
-              )}
-              {onSwapWaypoint && !isVisited && (
-                <button
-                  onClick={() => setSwapMenuOpen((o) => !o)}
-                  className={`flex items-center gap-1.5 text-[12px] font-medium transition-colors ${swapMenuOpen ? 'text-[#8ba88e]' : 'text-[#e5d3b3]/50 hover:text-[#e5d3b3]/80'}`}
-                  style={{ fontFamily: "var(--font-inter)" }}
-                >
-                  <Wand2 className="w-3.5 h-3.5" strokeWidth={1.5} />
-                  swap stop
-                </button>
-              )}
+              <span>{isVisited ? "visited" : `${waypoint.duration_mins} min`}</span>
             </div>
+            {waypoint.estimated_cost_usd !== undefined && (
+              <div className="flex items-center gap-1 whitespace-nowrap">
+                <span className="opacity-50">Est. spend:</span>
+                <span className="font-semibold text-[#e5d3b3]">
+                  {waypoint.estimated_cost_usd === 0 ? "Free" : `$${waypoint.estimated_cost_usd}`}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Actions Row */}
+          <div className="flex items-center justify-between pt-3 border-t border-[#f4f4f5]/6 text-[12px] gap-4">
+            {waypoint.lat && waypoint.lng && (
+               <a
+                  href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${waypoint.lat},${waypoint.lng}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-[#e5d3b3]/50 hover:text-[#e5d3b3]/80 font-medium transition-colors whitespace-nowrap"
+                  style={{ fontFamily: "var(--font-inter)" }}
+               >
+                 <MapPin className="w-3.5 h-3.5" strokeWidth={1.5} />
+                 Street View
+               </a>
+            )}
+            {onSwapWaypoint && !isVisited && (
+              <button
+                onClick={() => setSwapMenuOpen((o) => !o)}
+                className={`flex items-center gap-1 font-medium transition-colors whitespace-nowrap cursor-pointer ${swapMenuOpen ? 'text-[#8ba88e]' : 'text-[#e5d3b3]/50 hover:text-[#e5d3b3]/80'}`}
+                style={{ fontFamily: "var(--font-inter)" }}
+              >
+                <Wand2 className="w-3.5 h-3.5" strokeWidth={1.5} />
+                swap stop
+              </button>
+            )}
             <button
               id={`tip-toggle-${waypoint.order}`}
               onClick={() => setTipOpen((o) => !o)}
-              className="flex items-center gap-1.5 text-[#e5d3b3]/50 hover:text-[#e5d3b3]/80 text-[12px] font-medium transition-colors"
+              className="flex items-center gap-1 text-[#e5d3b3]/50 hover:text-[#e5d3b3]/80 font-medium transition-colors whitespace-nowrap cursor-pointer"
               style={{ fontFamily: "var(--font-inter)" }}
             >
               <Lightbulb className="w-3.5 h-3.5" strokeWidth={1.5} />
