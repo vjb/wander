@@ -1,3 +1,5 @@
+![wander banner](./assets/banner.png)
+
 # wander 🗺️
 
 > *the shortest path isn't the point.*
