@@ -1,7 +1,13 @@
-feat: optimise waypoint order via Google Distance Matrix API
+fix: add missing 'import re' — caused all route polylines to be empty
 
-Adds _optimize_waypoint_order() which fires a single square Distance
-Matrix call in walking mode, then brute-forces all N! permutations
-to find minimum total walking time. Silently falls back to original
-LLM order on any failure. Re-numbers waypoints after reorder.
-Logs time saved when more than 30s improvement found.
+The re module was used in _fetch_leg (re.sub to strip HTML from step
+instructions) but was never imported. The NameError was silently swallowed
+by the broad except clause, causing every leg to return polyline="" and
+steps=[], so WanderMap fell back to drawing straight lines between stops.
+
+Also fixes:
+- Insider tips: strip '(about: ...)' Foursquare/Wikipedia contamination
+  via re.sub at all 3 tip-append sites (main route, swap, detour)
+- Cap combined insider tip at 160 chars to prevent overflow
+- Improve _fetch_leg exception logging (was silent, now logs warning)
+- Escalate polyline decode errors from warning to error level

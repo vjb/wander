@@ -14,6 +14,7 @@ import json
 import logging
 import math
 import os
+import re
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -856,7 +857,8 @@ async def get_route_legs_info(addresses: List[str]) -> List[Dict]:
                 "polyline": "",
                 "steps": [],
             }
-        except Exception:
+        except Exception as leg_err:
+            logger.warning(f"_fetch_leg failed ({origin[:20]}→{destination[:20]}): {leg_err}")
             return {
                 "duration_mins": 8,
                 "distance_m": 600,
@@ -1376,8 +1378,12 @@ async def _enrich_route(
                 tips = data.get("tips", [])
                 if tips:
                     tip_text = tips[0].get("text", "")
-                    if tip_text:
-                        insider_tip = f"{insider_tip} (local tip: \"{tip_text.rstrip('.')}\")"
+                    # Strip Wikipedia-style '(about: ...)' suffixes Foursquare sometimes includes
+                    tip_text = re.sub(r"\s*\(about:.*", "", tip_text, flags=re.DOTALL).strip()
+                    if tip_text and len(tip_text) > 15:  # ignore trivial tips
+                        # Cap combined tip at 160 chars
+                        combined = f"{insider_tip} (local tip: \"{tip_text.rstrip('.')}\")"
+                        insider_tip = combined[:160].rsplit(' ', 1)[0] if len(combined) > 160 else combined
                 photos = data.get("photos", [])
                 if photos and not photo_url:
                     prefix = photos[0].get("prefix", "")
@@ -1462,7 +1468,7 @@ async def _enrich_route(
                 all_polyline_points.extend([list(pt) for pt in decoded])
             all_route_steps.extend(leg.get("steps", []))
     except Exception as poly_err:
-        logger.warning(f"Polyline decode failed (non-critical): {poly_err}")
+        logger.error(f"Polyline decode failed: {poly_err}")
         all_polyline_points = []
 
     # Fetch elevation profile concurrently (non-blocking — fire and forget into gather)
@@ -2418,8 +2424,10 @@ async def swap_waypoint(http_req: Request, request: WaypointSwapRequest):
             tips = fsq_details.get("tips", [])
             if tips:
                 tip_text = tips[0].get("text", "")
-                if tip_text:
-                    insider_tip = f"{insider_tip} (local tip: \"{tip_text.rstrip('.')}\")"
+                tip_text = re.sub(r"\s*\(about:.*", "", tip_text, flags=re.DOTALL).strip()
+                if tip_text and len(tip_text) > 15:
+                    combined = f"{insider_tip} (local tip: \"{tip_text.rstrip('.')}\")"
+                    insider_tip = combined[:160].rsplit(' ', 1)[0] if len(combined) > 160 else combined
             photos = fsq_details.get("photos", [])
             if photos and not photo_url:
                 prefix = photos[0].get("prefix", "")
@@ -2626,8 +2634,10 @@ async def vibe_detour(http_req: Request, request: VibeDetourRequest):
             tips = fsq_details.get("tips", [])
             if tips:
                 tip_text = tips[0].get("text", "")
-                if tip_text:
-                    insider_tip = f"{insider_tip} (local tip: \"{tip_text.rstrip('.')}\")"
+                tip_text = re.sub(r"\s*\(about:.*", "", tip_text, flags=re.DOTALL).strip()
+                if tip_text and len(tip_text) > 15:
+                    combined = f"{insider_tip} (local tip: \"{tip_text.rstrip('.')}\")"
+                    insider_tip = combined[:160].rsplit(' ', 1)[0] if len(combined) > 160 else combined
             photos = fsq_details.get("photos", [])
             if photos and not photo_url:
                 prefix = photos[0].get("prefix", "")
