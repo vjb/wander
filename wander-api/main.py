@@ -1427,7 +1427,8 @@ async def _enrich_route(
         )
 
     # ── Optimise waypoint order via Distance Matrix (minimise total walking) ──
-    if start_ll and end_ll and len(waypoints) >= 2:
+    # Only worth calling the API for 3+ stops (3! = 6 permutations to evaluate)
+    if start_ll and end_ll and len(waypoints) >= 3:
         waypoints = await _optimize_waypoint_order(start_ll, end_ll, waypoints)
         # Re-number after reorder
         for i, wp in enumerate(waypoints):

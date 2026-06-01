@@ -1,13 +1,7 @@
-fix: add missing 'import re' — caused all route polylines to be empty
+refactor: move 'avoid steep slopes' toggle into Advanced Filters accordion
 
-The re module was used in _fetch_leg (re.sub to strip HTML from step
-instructions) but was never imported. The NameError was silently swallowed
-by the broad except clause, causing every leg to return polyline="" and
-steps=[], so WanderMap fell back to drawing straight lines between stops.
+Was floating as a standalone row between the accordion and companion selector.
+Now lives as the last item inside the accordion panel, after 'free only',
+with a matching slope-chart icon and the same visual style as other options.
 
-Also fixes:
-- Insider tips: strip '(about: ...)' Foursquare/Wikipedia contamination
-  via re.sub at all 3 tip-append sites (main route, swap, detour)
-- Cap combined insider tip at 160 chars to prevent overflow
-- Improve _fetch_leg exception logging (was silent, now logs warning)
-- Escalate polyline decode errors from warning to error level
+Props added to AdvancedFiltersAccordion: avoidSlopes, setAvoidSlopes.

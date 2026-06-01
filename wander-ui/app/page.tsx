@@ -742,30 +742,10 @@ function InputScreen({
             setFreeOnly={setFreeOnly}
             maxBudget={maxBudget}
             setMaxBudget={setMaxBudget}
+            avoidSlopes={avoidSlopes}
+            setAvoidSlopes={setAvoidSlopes}
           />
 
-            {/* Avoid Steep Slopes (Flat walks only) */}
-            <div className="flex items-center justify-between border-t border-[#f4f4f5]/6 pt-4 mt-4">
-              <span className="text-[#f4f4f5]/60 text-xs font-light">
-                avoid steep slopes (flat walks only)
-              </span>
-              <button
-                id="avoid-slopes-toggle"
-                type="button"
-                role="switch"
-                aria-checked={avoidSlopes}
-                onClick={() => setAvoidSlopes(!avoidSlopes)}
-                className={`w-10 h-6 rounded-full transition-colors duration-200 focus:outline-none flex items-center p-0.5 cursor-pointer ${
-                  avoidSlopes ? 'bg-[#8ba88e]' : 'bg-[#f4f4f5]/10'
-                }`}
-              >
-                <div
-                  className={`w-5 h-5 rounded-full bg-[#131316] shadow-md transform transition-transform duration-200 ${
-                    avoidSlopes ? 'translate-x-4' : 'translate-x-0'
-                  }`}
-                />
-              </button>
-            </div>
 
             {/* Companion Row */}
             <div className="border-t border-[#f4f4f5]/6 pt-4 mt-4">
@@ -871,7 +851,7 @@ function InputScreen({
 // ── Advanced Filters Accordion ───────────────────────────────────────────────
 
 function AdvancedFiltersAccordion({
-  numStops, setNumStops, freeOnly, setFreeOnly, maxBudget, setMaxBudget,
+  numStops, setNumStops, freeOnly, setFreeOnly, maxBudget, setMaxBudget, avoidSlopes, setAvoidSlopes,
 }: {
   numStops: number;
   setNumStops: (v: number) => void;
@@ -879,6 +859,8 @@ function AdvancedFiltersAccordion({
   setFreeOnly: (v: boolean) => void;
   maxBudget: number;
   setMaxBudget: (v: number) => void;
+  avoidSlopes: boolean;
+  setAvoidSlopes: (v: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -961,6 +943,29 @@ function AdvancedFiltersAccordion({
               >
                 <div className={`w-5 h-5 rounded-full bg-[#131316] shadow-md transform transition-transform duration-200 ${
                   freeOnly ? "translate-x-4" : "translate-x-0"
+                }`} />
+              </button>
+            </div>
+
+            {/* Avoid Steep Slopes */}
+            <div className="flex items-center justify-between border-t border-[#f4f4f5]/6 pt-4 mt-4">
+              <div className="flex items-center gap-2">
+                <svg className="w-3.5 h-3.5 text-[#e5d3b3]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="22 7 13 16 8 11 2 17" />
+                  <line x1="2" y1="7" x2="2" y2="17" />
+                </svg>
+                <span className="text-[#f4f4f5]/60 text-xs font-light">avoid steep slopes (flat walks only)</span>
+              </div>
+              <button
+                id="avoid-slopes-toggle"
+                type="button" role="switch" aria-checked={avoidSlopes}
+                onClick={() => setAvoidSlopes(!avoidSlopes)}
+                className={`w-10 h-6 rounded-full transition-colors duration-200 focus:outline-none flex items-center p-0.5 cursor-pointer ${
+                  avoidSlopes ? "bg-[#8ba88e]" : "bg-[#f4f4f5]/10"
+                }`}
+              >
+                <div className={`w-5 h-5 rounded-full bg-[#131316] shadow-md transform transition-transform duration-200 ${
+                  avoidSlopes ? "translate-x-4" : "translate-x-0"
                 }`} />
               </button>
             </div>
@@ -2243,16 +2248,30 @@ export function RouteScreen({
                   <span
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/55 text-[11px] font-medium border border-[#f4f4f5]/10"
                     style={{ fontFamily: "var(--font-inter)" }}
-                    title="Estimated based on walking duration"
+                    title="Estimated from actual route distance (stride ≈ 0.762m)"
                   >
-                    👣 {Math.round(walkingMins * 120).toLocaleString()} steps
+                    {(() => {
+                      // Use actual distance if route_steps available, else fall back to time estimate
+                      const totalDistM = activeRoute.route_steps?.reduce((s, st) => s + (st.distance_m || 0), 0) ?? 0;
+                      const stepsCount = totalDistM > 50
+                        ? Math.round(totalDistM / 0.762)      // 0.762m = avg stride length
+                        : Math.round(walkingMins * 100);       // fallback: 100 steps/min
+                      return `👣 ${stepsCount.toLocaleString()} steps`;
+                    })()}
                   </span>
                   <span
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f4f4f5]/5 text-[#f4f4f5]/55 text-[11px] font-medium border border-[#f4f4f5]/10"
                     style={{ fontFamily: "var(--font-inter)" }}
-                    title="Estimated calories burned walking"
+                    title="Estimated calories burned walking (MET 3.5, 70 kg)"
                   >
-                    🔥 {Math.round(walkingMins * 4.5)} kcal
+                    {(() => {
+                      // MET 3.5 walking ≈ 0.057 kcal/kg/m for 70kg person
+                      const totalDistM = activeRoute.route_steps?.reduce((s, st) => s + (st.distance_m || 0), 0) ?? 0;
+                      const kcal = totalDistM > 50
+                        ? Math.round(totalDistM * 0.057)       // distance-based: ~57 kcal/km
+                        : Math.round(walkingMins * 4.5);       // fallback: time-based
+                      return `🔥 ${kcal} kcal`;
+                    })()}
                   </span>
                 </>
               );
